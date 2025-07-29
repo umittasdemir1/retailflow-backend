@@ -15,14 +15,11 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# CORS configuration - Allow all origins for now
-CORS(app, origins=["https://celadon-sundae-534e83.netlify.app"]), 
-     methods=["GET", "POST", "OPTIONS"],
-     allow_headers=["Content-Type", "Accept", "Authorization"])
+# CORS configuration
+CORS(app, origins=["https://celadon-sundae-534e83.netlify.app"])
 
 # Configuration
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
-ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
 class MagazaTransferSistemi:
     def __init__(self):
