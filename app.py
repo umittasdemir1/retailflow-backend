@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # CORS configuration - Allow all origins for now
-CORS(app, origins=["*"], 
+CORS(app, origins=["https://celadon-sundae-534e83.netlify.app"]), 
      methods=["GET", "POST", "OPTIONS"],
      allow_headers=["Content-Type", "Accept", "Authorization"])
 
