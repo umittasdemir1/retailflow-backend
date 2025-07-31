@@ -19,7 +19,8 @@ app = Flask(__name__)
 CORS(app, origins=["https://celadon-sundae-534e83.netlify.app"])
 
 # Configuration
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
+ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 
 class MagazaTransferSistemi:
     def __init__(self):
@@ -415,7 +416,7 @@ def analyze_data():
 
 @app.route('/export/excel', methods=['POST'])
 def export_excel():
-    """Excel export"""
+    """Excel export - Özelleştirilmiş sütunlar"""
     try:
         logger.info("Excel export request received")
         
@@ -436,11 +437,10 @@ def export_excel():
             if transferler:
                 df_transfer = pd.DataFrame(transferler)
                 
-                # Sütun mapping
-                kolon_mapping = {
-                    'urun_anahtari': 'Ürün Grubu (Ad+Renk+Beden)',
+                # SADECE İSTENEN SÜTUNLARI SEÇ VE YENİDEN ADLANDIR
+                selected_columns = {
                     'urun_kodu': 'Ürün Kodu',
-                    'urun_adi': 'Ürün Adı',
+                    'urun_adi': 'Ürün Adı', 
                     'renk': 'Renk',
                     'beden': 'Beden',
                     'gonderen_magaza': 'Gönderen Mağaza',
@@ -449,28 +449,22 @@ def export_excel():
                     'gonderen_satis': 'Gönderen Satış',
                     'gonderen_envanter': 'Gönderen Envanter',
                     'alan_satis': 'Alan Satış',
-                    'alan_envanter': 'Alan Envanter',
-                    'gonderen_str': 'Gönderen STR (%)',
-                    'alan_str': 'Alan STR (%)',
-                    'str_farki': 'STR Farkı (%)',
-                    'teorik_transfer': 'Teorik Transfer',
-                    'uygulanan_filtre': 'Uygulanan Filtre',
-                    'alan_stok_durumu': 'Alan Stok Durumu',
-                    'magaza_sayisi': 'Mevcut Mağaza Sayısı'
+                    'alan_envanter': 'Alan Envanter'
                 }
                 
-                # Sadece mevcut sütunları eşleştir
-                mevcut_mapping = {k: v for k, v in kolon_mapping.items() if k in df_transfer.columns}
-                df_transfer = df_transfer.rename(columns=mevcut_mapping)
-                tutulacak_kolonlar = list(mevcut_mapping.values())
-                df_transfer = df_transfer[tutulacak_kolonlar]
-                df_transfer.to_excel(writer, index=False, sheet_name='Transfer Önerileri')
+                # Sadece seçilen sütunları al
+                df_export = df_transfer[list(selected_columns.keys())].copy()
+                
+                # Sütun isimlerini değiştir
+                df_export = df_export.rename(columns=selected_columns)
+                
+                # Excel'e yaz
+                df_export.to_excel(writer, index=False, sheet_name='Transfer Önerileri')
             
-            # Transfer gerekmeyen ürünler sayfası
+            # Transfer gerekmeyen ürünler sayfası (değişiklik yok)
             if transfer_gereksiz:
                 df_gereksiz = pd.DataFrame(transfer_gereksiz)
                 gereksiz_mapping = {
-                    'urun_anahtari': 'Ürün Grubu (Ad+Renk+Beden)',
                     'urun_adi': 'Ürün Adı',
                     'renk': 'Renk',
                     'beden': 'Beden',
@@ -485,7 +479,7 @@ def export_excel():
                 df_gereksiz = df_gereksiz[gereksiz_kolonlar]
                 df_gereksiz.to_excel(writer, index=False, sheet_name='Transfer Gerekmeyen')
             
-            # Mağaza metrikleri
+            # Mağaza metrikleri sayfası (değişiklik yok)
             if sistem.mevcut_analiz['magaza_metrikleri']:
                 df_metrikler = pd.DataFrame(sistem.mevcut_analiz['magaza_metrikleri']).T
                 df_metrikler.to_excel(writer, sheet_name='Mağaza Metrikleri')
@@ -494,7 +488,7 @@ def export_excel():
         
         # Dosya adı
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f'global_transfer_analizi_{timestamp}.xlsx'
+        filename = f'transfer_{timestamp}.xlsx'
         
         logger.info(f"Excel file created: {filename}")
         
