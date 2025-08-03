@@ -26,11 +26,34 @@ ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 # Temp file path for session persistence
 TEMP_DATA_FILE = os.path.join(tempfile.gettempdir(), 'retailflow_data.pkl')
 
+# Strategy configurations
+STRATEGY_CONFIG = {
+    'sakin': {
+        'min_str_diff': 0.15,
+        'min_inventory': 3,
+        'max_transfer': 5,
+        'description': 'Güvenli ve kontrollü transfer yaklaşımı'
+    },
+    'kontrollu': {
+        'min_str_diff': 0.10,
+        'min_inventory': 2,
+        'max_transfer': 10,
+        'description': 'Dengeli risk ve performans'
+    },
+    'agresif': {
+        'min_str_diff': 0.08,
+        'min_inventory': 1,
+        'max_transfer': None,  # Sınırsız
+        'description': 'Maksimum performans odaklı'
+    }
+}
+
 class MagazaTransferSistemi:
     def __init__(self):
         self.data = None
         self.magazalar = []
         self.mevcut_analiz = None
+        self.current_strategy = 'sakin'
         self.load_from_temp()  # Session'dan veri yükle
 
     def save_to_temp(self):
@@ -40,7 +63,8 @@ class MagazaTransferSistemi:
                 pickle.dump({
                     'data': self.data,
                     'magazalar': self.magazalar,
-                    'mevcut_analiz': self.mevcut_analiz
+                    'mevcut_analiz': self.mevcut_analiz,
+                    'current_strategy': self.current_strategy
                 }, f)
             logger.info("Data saved to temp file")
         except Exception as e:
@@ -55,6 +79,7 @@ class MagazaTransferSistemi:
                     self.data = temp_data.get('data')
                     self.magazalar = temp_data.get('magazalar', [])
                     self.mevcut_analiz = temp_data.get('mevcut_analiz')
+                    self.current_strategy = temp_data.get('current_strategy', 'sakin')
                 logger.info("Data loaded from temp file")
         except Exception as e:
             logger.error(f"Failed to load temp data: {e}")
@@ -135,48 +160,68 @@ class MagazaTransferSistemi:
             return 0
         return satis / toplam
 
-    def str_bazli_transfer_hesapla(self, gonderen_satis, gonderen_envanter, alan_satis, alan_envanter):
-        """STR bazlı transfer miktarı hesapla"""
+    def str_bazli_transfer_hesapla(self, gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy='sakin'):
+        """STR bazlı transfer miktarı hesapla - Strategy parametreli"""
         gonderen_str = self.str_hesapla(gonderen_satis, gonderen_envanter)
         alan_str = self.str_hesapla(alan_satis, alan_envanter)
         str_farki = alan_str - gonderen_str
         teorik_transfer = str_farki * gonderen_envanter
         
-        # Koruma filtreleri
-        max_transfer_40 = gonderen_envanter * 0.40
-        min_kalan_2 = gonderen_envanter - 2
-        max_5_adet = 5
+        # Strategy config al
+        config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
         
-        transfer_miktari = min(teorik_transfer, max_transfer_40, min_kalan_2, max_5_adet)
+        # Koruma filtreleri - strategy bazlı
+        max_transfer_40 = gonderen_envanter * 0.40
+        
+        # Strategy'ye göre minimum kalan
+        min_kalan = gonderen_envanter - config['min_inventory']
+        
+        # Strategy'ye göre maksimum transfer
+        if config['max_transfer'] is None:
+            max_transfer_limit = float('inf')  # Sınırsız
+        else:
+            max_transfer_limit = config['max_transfer']
+        
+        transfer_miktari = min(teorik_transfer, max_transfer_40, min_kalan, max_transfer_limit)
         transfer_miktari = max(1, min(transfer_miktari, gonderen_envanter))
+        
+        # Hangi filtre uygulandığını belirle
+        uygulanan_filtre = 'Teorik'
+        if transfer_miktari == max_transfer_40:
+            uygulanan_filtre = 'Max %40'
+        elif transfer_miktari == min_kalan:
+            uygulanan_filtre = f'Min {config["min_inventory"]} kalsın'
+        elif transfer_miktari == max_transfer_limit and config['max_transfer'] is not None:
+            uygulanan_filtre = f'Max {config["max_transfer"]} adet'
         
         return int(transfer_miktari), {
             'gonderen_str': round(gonderen_str * 100, 1),
             'alan_str': round(alan_str * 100, 1),
             'str_farki': round(str_farki * 100, 1),
             'teorik_transfer': round(teorik_transfer, 1),
-            'uygulanan_filtre': 'Max %40' if transfer_miktari == max_transfer_40 else 
-                               'Min 2 kalsın' if transfer_miktari == min_kalan_2 else
-                               'Max 5 adet' if transfer_miktari == max_5_adet else 'Teorik'
+            'uygulanan_filtre': uygulanan_filtre,
+            'kullanilan_strateji': strategy
         }
 
-    def transfer_kosulları_kontrol(self, gonderen_satis, gonderen_envanter, alan_satis, alan_envanter):
-        """STR bazlı transfer koşulları kontrol"""
+    def transfer_kosulları_kontrol(self, gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy='sakin'):
+        """STR bazlı transfer koşulları kontrol - Strategy parametreli"""
+        config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
+        
         if alan_satis <= gonderen_satis:
             return False, f"Alan satış ({alan_satis}) ≤ Gönderen satış ({gonderen_satis})"
         
-        if gonderen_envanter < 3:
-            return False, f"Gönderen envanter yetersiz ({gonderen_envanter} < 3)"
+        if gonderen_envanter < config['min_inventory']:
+            return False, f"Gönderen envanter yetersiz ({gonderen_envanter} < {config['min_inventory']})"
         
         gonderen_str = self.str_hesapla(gonderen_satis, gonderen_envanter)
         alan_str = self.str_hesapla(alan_satis, alan_envanter)
         str_farki = alan_str - gonderen_str
         
-        if str_farki < 0.15:
-            return False, f"STR farkı yetersiz ({str_farki*100:.1f}% < 15%)"
+        if str_farki < config['min_str_diff']:
+            return False, f"STR farkı yetersiz ({str_farki*100:.1f}% < {config['min_str_diff']*100}%)"
         
         transfer_miktari, detaylar = self.str_bazli_transfer_hesapla(
-            gonderen_satis, gonderen_envanter, alan_satis, alan_envanter
+            gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy
         )
         
         if transfer_miktari <= 0:
@@ -184,12 +229,17 @@ class MagazaTransferSistemi:
         
         return True, f"STR: A{detaylar['alan_str']}%>G{detaylar['gonderen_str']}%, T:{transfer_miktari}"
 
-    def global_transfer_analizi_yap(self):
-        """Global ürün bazlı transfer analizi"""
+    def global_transfer_analizi_yap(self, strategy='sakin'):
+        """Global ürün bazlı transfer analizi - Strategy parametreli"""
         if self.data is None:
             return None
 
-        logger.info("Global ürün bazlı STR transfer analizi başlatılıyor...")
+        # Strategy'yi kaydet
+        self.current_strategy = strategy
+        config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
+
+        logger.info(f"Global ürün bazlı STR transfer analizi başlatılıyor... Strateji: {strategy}")
+        logger.info(f"Strateji parametreleri: {config}")
         
         metrikler = self.magaza_metrikleri_hesapla()
         transferler = []
@@ -258,17 +308,19 @@ class MagazaTransferSistemi:
             en_dusuk_str = magaza_str_listesi[0]
             en_yuksek_str = magaza_str_listesi[-1]
 
-            # Transfer koşullarını kontrol et
+            # Transfer koşullarını kontrol et - Strategy parametreli
             kosul_sonuc, kosul_mesaj = self.transfer_kosulları_kontrol(
                 en_dusuk_str['satis'], en_dusuk_str['envanter'], 
-                en_yuksek_str['satis'], en_yuksek_str['envanter']
+                en_yuksek_str['satis'], en_yuksek_str['envanter'],
+                strategy
             )
             
             if kosul_sonuc:
-                # STR bazlı transfer miktarını hesapla
+                # STR bazlı transfer miktarını hesapla - Strategy parametreli
                 transfer_miktari, str_detaylar = self.str_bazli_transfer_hesapla(
                     en_dusuk_str['satis'], en_dusuk_str['envanter'],
-                    en_yuksek_str['satis'], en_yuksek_str['envanter']
+                    en_yuksek_str['satis'], en_yuksek_str['envanter'],
+                    strategy
                 )
                 
                 if transfer_miktari > 0:
@@ -301,6 +353,7 @@ class MagazaTransferSistemi:
                         'str_farki': str_detaylar['str_farki'],
                         'teorik_transfer': str_detaylar['teorik_transfer'],
                         'uygulanan_filtre': str_detaylar['uygulanan_filtre'],
+                        'kullanilan_strateji': str_detaylar['kullanilan_strateji'],
                         'alan_stok_durumu': stok_durumu,
                         'magaza_sayisi': len(magaza_str_listesi),
                         'min_str': round(en_dusuk_str['str'] * 100, 1),
@@ -327,10 +380,12 @@ class MagazaTransferSistemi:
         # STR farkına göre sırala (yüksek fark = daha öncelikli)
         transferler.sort(key=lambda x: x['str_farki'], reverse=True)
 
-        logger.info(f"Global analiz tamamlandı: {len(transferler)} transfer, {len(transfer_gereksiz)} red")
+        logger.info(f"Global analiz tamamlandı ({strategy}): {len(transferler)} transfer, {len(transfer_gereksiz)} red")
 
         result = {
             'analiz_tipi': 'global',
+            'strateji': strategy,
+            'strateji_parametreleri': config,
             'magaza_metrikleri': metrikler,
             'transferler': transferler,
             'transfer_gereksiz': transfer_gereksiz
@@ -351,10 +406,12 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'service': 'RetailFlow Transfer API',
-        'version': '5.1.0',
+        'version': '5.2.0',
         'timestamp': datetime.now().isoformat(),
         'data_loaded': sistem.data is not None,
-        'store_count': len(sistem.magazalar) if sistem.magazalar else 0
+        'store_count': len(sistem.magazalar) if sistem.magazalar else 0,
+        'current_strategy': sistem.current_strategy,
+        'available_strategies': list(STRATEGY_CONFIG.keys())
     })
 
 @app.route('/upload', methods=['POST'])
@@ -411,7 +468,7 @@ def upload_file():
 
 @app.route('/analyze', methods=['POST'])
 def analyze_data():
-    """Global STR transfer analizi"""
+    """Global STR transfer analizi - Strategy parametreli"""
     try:
         logger.info("Analysis request received")
         
@@ -419,10 +476,19 @@ def analyze_data():
             logger.warning("No data available for analysis")
             return jsonify({'error': 'Önce bir dosya yükleyin'}), 400
         
-        logger.info("Starting global STR transfer analysis...")
+        # Strategy parametresini al
+        request_data = request.get_json() or {}
+        strategy = request_data.get('strategy', 'sakin')
         
-        # ORIJINAL ANALİZ ALGORITMASINI ÇALIŞTIR
-        results = sistem.global_transfer_analizi_yap()
+        # Strategy geçerliliğini kontrol et
+        if strategy not in STRATEGY_CONFIG:
+            logger.warning(f"Invalid strategy: {strategy}")
+            strategy = 'sakin'
+        
+        logger.info(f"Starting global STR transfer analysis... Strategy: {strategy}")
+        
+        # ORIJINAL ANALİZ ALGORITMASINI ÇALIŞTIR - Strategy parametreli
+        results = sistem.global_transfer_analizi_yap(strategy)
         
         if results:
             sistem.mevcut_analiz = results
@@ -430,6 +496,8 @@ def analyze_data():
             # SADECE İLK 50 TRANSFER ÖNERİSİNİ GÖNDER (JSON boyutunu küçült)
             limited_results = {
                 'analiz_tipi': results['analiz_tipi'],
+                'strateji': results['strateji'],
+                'strateji_parametreleri': results['strateji_parametreleri'],
                 'magaza_metrikleri': results['magaza_metrikleri'],
                 'transferler': results['transferler'][:50],  # İlk 50 tane
                 'transfer_gereksiz': results['transfer_gereksiz'][:20],  # İlk 20 tane
@@ -437,7 +505,7 @@ def analyze_data():
                 'toplam_gereksiz_sayisi': len(results['transfer_gereksiz'])
             }
             
-            logger.info(f"Analysis completed: {len(results['transferler'])} total transfers")
+            logger.info(f"Analysis completed ({strategy}): {len(results['transferler'])} total transfers")
             
             return jsonify({
                 'success': True,
@@ -463,8 +531,9 @@ def export_excel():
         
         transferler = sistem.mevcut_analiz['transferler']
         transfer_gereksiz = sistem.mevcut_analiz.get('transfer_gereksiz', [])
+        strategy = sistem.mevcut_analiz.get('strateji', 'sakin')
         
-        logger.info(f"Exporting {len(transferler)} transfers to Excel")
+        logger.info(f"Exporting {len(transferler)} transfers to Excel (Strategy: {strategy})")
         
         # Excel dosyası oluştur
         output = io.BytesIO()
@@ -486,7 +555,9 @@ def export_excel():
                     'gonderen_satis': 'Gönderen Satış',
                     'gonderen_envanter': 'Gönderen Envanter',
                     'alan_satis': 'Alan Satış',
-                    'alan_envanter': 'Alan Envanter'
+                    'alan_envanter': 'Alan Envanter',
+                    'str_farki': 'STR Farkı (%)',
+                    'kullanilan_strateji': 'Kullanılan Strateji'
                 }
                 
                 # Sadece seçilen sütunları al
@@ -498,7 +569,7 @@ def export_excel():
                 # Excel'e yaz
                 df_export.to_excel(writer, index=False, sheet_name='Transfer Önerileri')
             
-            # Transfer gerekmeyen ürünler sayfası (değişiklik yok)
+            # Transfer gerekmeyen ürünler sayfası
             if transfer_gereksiz:
                 df_gereksiz = pd.DataFrame(transfer_gereksiz)
                 gereksiz_mapping = {
@@ -516,16 +587,27 @@ def export_excel():
                 df_gereksiz = df_gereksiz[gereksiz_kolonlar]
                 df_gereksiz.to_excel(writer, index=False, sheet_name='Transfer Gerekmeyen')
             
-            # Mağaza metrikleri sayfası (değişiklik yok)
+            # Mağaza metrikleri sayfası
             if sistem.mevcut_analiz['magaza_metrikleri']:
                 df_metrikler = pd.DataFrame(sistem.mevcut_analiz['magaza_metrikleri']).T
                 df_metrikler.to_excel(writer, sheet_name='Mağaza Metrikleri')
+            
+            # Strateji bilgileri sayfası
+            strategy_info = {
+                'Kullanılan Strateji': [strategy],
+                'Açıklama': [STRATEGY_CONFIG[strategy]['description']],
+                'Minimum STR Farkı (%)': [STRATEGY_CONFIG[strategy]['min_str_diff'] * 100],
+                'Minimum Envanter': [STRATEGY_CONFIG[strategy]['min_inventory']],
+                'Maksimum Transfer': [STRATEGY_CONFIG[strategy]['max_transfer'] or 'Sınırsız']
+            }
+            df_strategy = pd.DataFrame(strategy_info)
+            df_strategy.to_excel(writer, index=False, sheet_name='Strateji Bilgileri')
         
         output.seek(0)
         
         # Dosya adı
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f'transfer_{timestamp}.xlsx'
+        filename = f'transfer_{strategy}_{timestamp}.xlsx'
         
         logger.info(f"Excel file created: {filename}")
         
@@ -602,6 +684,32 @@ def get_stores():
     except Exception as e:
         logger.error(f"Stores error: {str(e)}")
         return jsonify({'error': f'Mağaza verisi hatası: {str(e)}'}), 500
+
+@app.route('/strategies', methods=['GET'])
+def get_strategies():
+    """Mevcut stratejileri listele"""
+    try:
+        strategies = []
+        for key, config in STRATEGY_CONFIG.items():
+            strategies.append({
+                'name': key,
+                'description': config['description'],
+                'parameters': {
+                    'min_str_diff_percent': config['min_str_diff'] * 100,
+                    'min_inventory': config['min_inventory'],
+                    'max_transfer': config['max_transfer']
+                }
+            })
+        
+        return jsonify({
+            'success': True,
+            'strategies': strategies,
+            'current_strategy': sistem.current_strategy
+        })
+        
+    except Exception as e:
+        logger.error(f"Strategies error: {str(e)}")
+        return jsonify({'error': f'Strateji verisi hatası: {str(e)}'}), 500
 
 # Error handlers
 @app.errorhandler(413)
