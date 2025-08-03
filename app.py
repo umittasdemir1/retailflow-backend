@@ -16,10 +16,10 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # CORS configuration
-CORS(app, origins=["https://celadon-sundae-534e83.netlify.app"])
+CORS(app, origins=["*"])
 
 # Configuration
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
 ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 
 class MagazaTransferSistemi:
@@ -585,3 +585,4 @@ if __name__ == '__main__':
     
     logger.info(f"Starting RetailFlow API on port {port}")
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
+
