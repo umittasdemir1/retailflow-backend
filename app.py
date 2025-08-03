@@ -8,6 +8,7 @@ from datetime import datetime
 from werkzeug.utils import secure_filename
 import tempfile
 import logging
+import pickle
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -15,18 +16,48 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# CORS configuration
+# CORS configuration - Tüm origin'lere izin
 CORS(app, origins=["*"])
 
-# Configuration
+# Configuration - Büyük dosya desteği
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
 ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
+
+# Temp file path for session persistence
+TEMP_DATA_FILE = os.path.join(tempfile.gettempdir(), 'retailflow_data.pkl')
 
 class MagazaTransferSistemi:
     def __init__(self):
         self.data = None
         self.magazalar = []
         self.mevcut_analiz = None
+        self.load_from_temp()  # Session'dan veri yükle
+
+    def save_to_temp(self):
+        """Veriyi geçici dosyaya kaydet"""
+        try:
+            with open(TEMP_DATA_FILE, 'wb') as f:
+                pickle.dump({
+                    'data': self.data,
+                    'magazalar': self.magazalar,
+                    'mevcut_analiz': self.mevcut_analiz
+                }, f)
+            logger.info("Data saved to temp file")
+        except Exception as e:
+            logger.error(f"Failed to save temp data: {e}")
+
+    def load_from_temp(self):
+        """Geçici dosyadan veriyi yükle"""
+        try:
+            if os.path.exists(TEMP_DATA_FILE):
+                with open(TEMP_DATA_FILE, 'rb') as f:
+                    temp_data = pickle.load(f)
+                    self.data = temp_data.get('data')
+                    self.magazalar = temp_data.get('magazalar', [])
+                    self.mevcut_analiz = temp_data.get('mevcut_analiz')
+                logger.info("Data loaded from temp file")
+        except Exception as e:
+            logger.error(f"Failed to load temp data: {e}")
 
     def dosya_yukle_df(self, df):
         """DataFrame'i yükle ve işle"""
@@ -55,13 +86,16 @@ class MagazaTransferSistemi:
             
             logger.info(f"Veri yüklendi: {len(df)} satır, {len(self.magazalar)} mağaza")
             
-            return True, {
+            result = {
                 'message': f"Başarılı! {len(df):,} ürün, {len(self.magazalar)} mağaza yüklendi.",
                 'satir_sayisi': len(df),
                 'magaza_sayisi': len(self.magazalar),
                 'magazalar': self.magazalar,
                 'sutunlar': list(df.columns)
             }
+            
+            self.save_to_temp()  # Veriyi kaydet
+            return True, result
             
         except Exception as e:
             logger.error(f"Dosya yükleme hatası: {str(e)}")
@@ -295,12 +329,15 @@ class MagazaTransferSistemi:
 
         logger.info(f"Global analiz tamamlandı: {len(transferler)} transfer, {len(transfer_gereksiz)} red")
 
-        return {
+        result = {
             'analiz_tipi': 'global',
             'magaza_metrikleri': metrikler,
             'transferler': transferler,
             'transfer_gereksiz': transfer_gereksiz
         }
+        
+        self.save_to_temp()  # Analiz sonucunu kaydet
+        return result
 
 # Global sistem instance
 sistem = MagazaTransferSistemi()
@@ -314,7 +351,7 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'service': 'RetailFlow Transfer API',
-        'version': '5.0.0',
+        'version': '5.1.0',
         'timestamp': datetime.now().isoformat(),
         'data_loaded': sistem.data is not None,
         'store_count': len(sistem.magazalar) if sistem.magazalar else 0
@@ -569,7 +606,7 @@ def get_stores():
 # Error handlers
 @app.errorhandler(413)
 def too_large(e):
-    return jsonify({'error': 'Dosya boyutu çok büyük (max 50MB)'}), 413
+    return jsonify({'error': 'Dosya boyutu çok büyük (max 100MB)'}), 413
 
 @app.errorhandler(500)
 def internal_error(error):
@@ -585,4 +622,3 @@ if __name__ == '__main__':
     
     logger.info(f"Starting RetailFlow API on port {port}")
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
-
