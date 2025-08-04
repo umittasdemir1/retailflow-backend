@@ -381,7 +381,7 @@ class MagazaTransferSistemi:
                         'magaza_sayisi': len(magaza_str_listesi),
                         'min_str': round(en_dusuk_str['str'] * 100, 1),
                         'max_str': round(en_yuksek_str['str'] * 100, 1),
-                        'salis_farki': int(en_yuksek_str['satis'] - en_dusuk_str['salis']),
+                        'salis_farki': int(en_yuksek_str['satis'] - en_dusuk_str['satis']),
                         'envanter_farki': int(en_dusuk_str['envanter'] - en_yuksek_str['envanter'])
                     })
             else:
