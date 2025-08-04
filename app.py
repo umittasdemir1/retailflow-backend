@@ -54,6 +54,7 @@ class MagazaTransferSistemi:
         self.magazalar = []
         self.mevcut_analiz = None
         self.current_strategy = 'sakin'
+        self.excluded_stores = []
         self.load_from_temp()  # Session'dan veri yükle
 
     def save_to_temp(self):
@@ -64,7 +65,8 @@ class MagazaTransferSistemi:
                     'data': self.data,
                     'magazalar': self.magazalar,
                     'mevcut_analiz': self.mevcut_analiz,
-                    'current_strategy': self.current_strategy
+                    'current_strategy': self.current_strategy,
+                    'excluded_stores': self.excluded_stores
                 }, f)
             logger.info("Data saved to temp file")
         except Exception as e:
@@ -80,6 +82,7 @@ class MagazaTransferSistemi:
                     self.magazalar = temp_data.get('magazalar', [])
                     self.mevcut_analiz = temp_data.get('mevcut_analiz')
                     self.current_strategy = temp_data.get('current_strategy', 'sakin')
+                    self.excluded_stores = temp_data.get('excluded_stores', [])
                 logger.info("Data loaded from temp file")
         except Exception as e:
             logger.error(f"Failed to load temp data: {e}")
@@ -229,16 +232,21 @@ class MagazaTransferSistemi:
         
         return True, f"STR: A{detaylar['alan_str']}%>G{detaylar['gonderen_str']}%, T:{transfer_miktari}"
 
-    def global_transfer_analizi_yap(self, strategy='sakin'):
-        """Global ürün bazlı transfer analizi - Strategy parametreli"""
+    def global_transfer_analizi_yap(self, strategy='sakin', excluded_stores=None):
+        """Global ürün bazlı transfer analizi - Strategy ve excluded_stores parametreli"""
         if self.data is None:
             return None
 
         # Strategy'yi kaydet
         self.current_strategy = strategy
+        if excluded_stores is None:
+            excluded_stores = []
+        self.excluded_stores = excluded_stores
+        
         config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
 
         logger.info(f"Global ürün bazlı STR transfer analizi başlatılıyor... Strateji: {strategy}")
+        logger.info(f"İstisna mağazalar: {excluded_stores}")
         logger.info(f"Strateji parametreleri: {config}")
         
         metrikler = self.magaza_metrikleri_hesapla()
@@ -247,6 +255,12 @@ class MagazaTransferSistemi:
 
         # TÜM mağazaların ürünlerini grupla (ürün adı + renk + beden)
         tum_data = self.data.copy()
+        
+        # İstisna mağazaları filtrele
+        if excluded_stores:
+            tum_data = tum_data[~tum_data['Depo Adı'].isin(excluded_stores)]
+            logger.info(f"İstisna mağazalar filtrelendi. Kalan veri: {len(tum_data)} satır")
+        
         tum_data['urun_anahtari'] = tum_data.apply(
             lambda x: self.urun_anahtari_olustur(
                 x['Ürün Adı'], 
@@ -286,6 +300,11 @@ class MagazaTransferSistemi:
             magaza_str_listesi = []
             for _, magaza_grup in magaza_gruplari.iterrows():
                 magaza = magaza_grup['Depo Adı']
+                
+                # İstisna mağaza kontrolü (extra güvenlik)
+                if magaza in excluded_stores:
+                    continue
+                    
                 satis = magaza_grup['Satis']
                 envanter = magaza_grup['Envanter']
                 str_value = self.str_hesapla(satis, envanter)
@@ -300,6 +319,10 @@ class MagazaTransferSistemi:
                     'beden': magaza_grup.get('Beden', ''),
                     'urun_kodu': magaza_grup['Ürün Kodu']
                 })
+
+            # En az 2 mağaza kaldıysa devam et
+            if len(magaza_str_listesi) < 2:
+                continue
 
             # STR'a göre sırala (düşükten yükseğe)
             magaza_str_listesi.sort(key=lambda x: x['str'])
@@ -358,7 +381,7 @@ class MagazaTransferSistemi:
                         'magaza_sayisi': len(magaza_str_listesi),
                         'min_str': round(en_dusuk_str['str'] * 100, 1),
                         'max_str': round(en_yuksek_str['str'] * 100, 1),
-                        'salis_farki': int(en_yuksek_str['satis'] - en_dusuk_str['satis']),
+                        'salis_farki': int(en_yuksek_str['satis'] - en_dusuk_str['salis']),
                         'envanter_farki': int(en_dusuk_str['envanter'] - en_yuksek_str['envanter'])
                     })
             else:
@@ -381,11 +404,15 @@ class MagazaTransferSistemi:
         transferler.sort(key=lambda x: x['str_farki'], reverse=True)
 
         logger.info(f"Global analiz tamamlandı ({strategy}): {len(transferler)} transfer, {len(transfer_gereksiz)} red")
+        if excluded_stores:
+            logger.info(f"İstisna mağazalar: {excluded_stores}")
 
         result = {
             'analiz_tipi': 'global',
             'strateji': strategy,
             'strateji_parametreleri': config,
+            'excluded_stores': excluded_stores,
+            'excluded_count': len(excluded_stores),
             'magaza_metrikleri': metrikler,
             'transferler': transferler,
             'transfer_gereksiz': transfer_gereksiz
@@ -411,6 +438,7 @@ def health_check():
         'data_loaded': sistem.data is not None,
         'store_count': len(sistem.magazalar) if sistem.magazalar else 0,
         'current_strategy': sistem.current_strategy,
+        'excluded_stores': sistem.excluded_stores,
         'available_strategies': list(STRATEGY_CONFIG.keys())
     })
 
@@ -468,7 +496,7 @@ def upload_file():
 
 @app.route('/analyze', methods=['POST'])
 def analyze_data():
-    """Global STR transfer analizi - Strategy parametreli"""
+    """Global STR transfer analizi - Strategy ve excluded_stores parametreli"""
     try:
         logger.info("Analysis request received")
         
@@ -476,19 +504,28 @@ def analyze_data():
             logger.warning("No data available for analysis")
             return jsonify({'error': 'Önce bir dosya yükleyin'}), 400
         
-        # Strategy parametresini al
+        # Strategy ve excluded_stores parametrelerini al
         request_data = request.get_json() or {}
         strategy = request_data.get('strategy', 'sakin')
+        excluded_stores = request_data.get('excluded_stores', [])
         
         # Strategy geçerliliğini kontrol et
         if strategy not in STRATEGY_CONFIG:
             logger.warning(f"Invalid strategy: {strategy}")
             strategy = 'sakin'
         
-        logger.info(f"Starting global STR transfer analysis... Strategy: {strategy}")
+        # Excluded stores listesini temizle
+        if not isinstance(excluded_stores, list):
+            excluded_stores = []
         
-        # ORIJINAL ANALİZ ALGORITMASINI ÇALIŞTIR - Strategy parametreli
-        results = sistem.global_transfer_analizi_yap(strategy)
+        # Excluded stores'ları mevcut mağaza listesiyle filtrele
+        valid_excluded_stores = [store for store in excluded_stores if store in sistem.magazalar]
+        
+        logger.info(f"Starting global STR transfer analysis... Strategy: {strategy}")
+        logger.info(f"Excluded stores: {valid_excluded_stores}")
+        
+        # ORIJINAL ANALİZ ALGORITMASINI ÇALIŞTIR - Strategy ve excluded_stores parametreli
+        results = sistem.global_transfer_analizi_yap(strategy, valid_excluded_stores)
         
         if results:
             sistem.mevcut_analiz = results
@@ -498,6 +535,8 @@ def analyze_data():
                 'analiz_tipi': results['analiz_tipi'],
                 'strateji': results['strateji'],
                 'strateji_parametreleri': results['strateji_parametreleri'],
+                'excluded_stores': results['excluded_stores'],
+                'excluded_count': results['excluded_count'],
                 'magaza_metrikleri': results['magaza_metrikleri'],
                 'transferler': results['transferler'][:50],  # İlk 50 tane
                 'transfer_gereksiz': results['transfer_gereksiz'][:20],  # İlk 20 tane
@@ -506,6 +545,8 @@ def analyze_data():
             }
             
             logger.info(f"Analysis completed ({strategy}): {len(results['transferler'])} total transfers")
+            if valid_excluded_stores:
+                logger.info(f"Excluded {len(valid_excluded_stores)} stores from analysis")
             
             return jsonify({
                 'success': True,
@@ -592,13 +633,24 @@ def export_excel():
                 df_metrikler = pd.DataFrame(sistem.mevcut_analiz['magaza_metrikleri']).T
                 df_metrikler.to_excel(writer, sheet_name='Mağaza Metrikleri')
             
+            # İstisna mağaza bilgileri sayfası
+            if sistem.excluded_stores:
+                excluded_info = {
+                    'İstisna Mağaza': sistem.excluded_stores,
+                    'Durum': ['Transferden Hariç'] * len(sistem.excluded_stores),
+                    'Açıklama': ['Bu mağaza ne gönderen ne alan olarak kullanılmıyor'] * len(sistem.excluded_stores)
+                }
+                df_excluded = pd.DataFrame(excluded_info)
+                df_excluded.to_excel(writer, index=False, sheet_name='İstisna Mağazalar')
+            
             # Strateji bilgileri sayfası
             strategy_info = {
                 'Kullanılan Strateji': [strategy],
                 'Açıklama': [STRATEGY_CONFIG[strategy]['description']],
                 'Minimum STR Farkı (%)': [STRATEGY_CONFIG[strategy]['min_str_diff'] * 100],
                 'Minimum Envanter': [STRATEGY_CONFIG[strategy]['min_inventory']],
-                'Maksimum Transfer': [STRATEGY_CONFIG[strategy]['max_transfer'] or 'Sınırsız']
+                'Maksimum Transfer': [STRATEGY_CONFIG[strategy]['max_transfer'] or 'Sınırsız'],
+                'İstisna Mağaza Sayısı': [len(sistem.excluded_stores)]
             }
             df_strategy = pd.DataFrame(strategy_info)
             df_strategy.to_excel(writer, index=False, sheet_name='Strateji Bilgileri')
@@ -607,7 +659,8 @@ def export_excel():
         
         # Dosya adı
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f'transfer_{strategy}_{timestamp}.xlsx'
+        excluded_suffix = f"_exc{len(sistem.excluded_stores)}" if sistem.excluded_stores else ""
+        filename = f'transfer_{strategy}{excluded_suffix}_{timestamp}.xlsx'
         
         logger.info(f"Excel file created: {filename}")
         
