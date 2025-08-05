@@ -87,6 +87,26 @@ class MagazaTransferSistemi:
         except Exception as e:
             logger.error(f"Failed to load temp data: {e}")
 
+    def clear_all_data(self):
+        """Tüm veriyi temizle"""
+        try:
+            self.data = None
+            self.magazalar = []
+            self.mevcut_analiz = None
+            self.current_strategy = 'sakin'
+            self.excluded_stores = []
+            
+            # Geçici dosyayı da sil
+            if os.path.exists(TEMP_DATA_FILE):
+                os.remove(TEMP_DATA_FILE)
+                logger.info("Temp data file removed")
+            
+            logger.info("All data cleared successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to clear data: {e}")
+            return False
+
     def dosya_yukle_df(self, df):
         """DataFrame'i yükle ve işle"""
         try:
@@ -493,6 +513,34 @@ def upload_file():
     except Exception as e:
         logger.error(f"Upload error: {str(e)}")
         return jsonify({'error': f'Dosya yükleme hatası: {str(e)}'}), 500
+
+@app.route('/remove-file', methods=['POST'])
+def remove_file():
+    """Yüklenen dosyayı kaldırma endpoint'i"""
+    try:
+        logger.info("File removal request received")
+        
+        if sistem.data is None:
+            logger.warning("No file to remove")
+            return jsonify({'error': 'Kaldırılacak dosya yok'}), 400
+        
+        # Tüm veriyi temizle
+        success = sistem.clear_all_data()
+        
+        if success:
+            logger.info("File and all data removed successfully")
+            return jsonify({
+                'success': True,
+                'message': 'Dosya ve tüm veriler başarıyla kaldırıldı',
+                'timestamp': datetime.now().isoformat()
+            })
+        else:
+            logger.error("Failed to remove file and data")
+            return jsonify({'error': 'Dosya kaldırma işlemi başarısız'}), 500
+            
+    except Exception as e:
+        logger.error(f"File removal error: {str(e)}")
+        return jsonify({'error': f'Dosya kaldırma hatası: {str(e)}'}), 500
 
 @app.route('/analyze', methods=['POST'])
 def analyze_data():
