@@ -26,6 +26,63 @@ ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 # Temp file path for session persistence
 TEMP_DATA_FILE = os.path.join(tempfile.gettempdir(), 'retailflow_data.pkl')
 
+# BEDEN HARİTASI - JSON dosyasından yükle
+def load_beden_haritasi():
+    """Beden haritasını JSON dosyasından yükle"""
+    try:
+        json_path = os.path.join(os.path.dirname(__file__), 'beden_haritasi.json')
+        with open(json_path, 'r', encoding='utf-8') as f:
+            beden_array = json.load(f)
+        
+        # Array formatını dictionary'ye çevir
+        beden_haritasi = {}
+        for item in beden_array:
+            if isinstance(item, dict) and 'ÜRÜN ADI' in item and 'BEDEN ARALIĞI' in item:
+                urun_adi = str(item['ÜRÜN ADI']).strip().upper()
+                beden_araligi = str(item['BEDEN ARALIĞI']).strip()
+                
+                # Skip header row
+                if urun_adi == 'ÜRÜN ADI' or beden_araligi == 'BEDEN ARALIĞI':
+                    continue
+                
+                # Bedenleri array'e çevir
+                if ',' in beden_araligi:
+                    bedenler = [b.strip() for b in beden_araligi.split(',')]
+                else:
+                    bedenler = [beden_araligi]
+                
+                # Kategori belirleme
+                if any(b in beden_araligi.upper() for b in ['XS', 'S', 'M', 'L']):
+                    if '-' in beden_araligi:
+                        kategori = 'kombine'
+                    else:
+                        kategori = 'tekstil'
+                elif any(b in beden_araligi for b in ['28', '30', '32', '34']):
+                    kategori = 'pantolon'
+                elif any(b in beden_araligi for b in ['36', '38', '40', '42']):
+                    kategori = 'ayakkabi'
+                elif 'STD' in beden_araligi.upper():
+                    kategori = 'standart'
+                elif any(b in beden_araligi for b in ['Y', '110', '120', '130']):
+                    kategori = 'cocuk'
+                else:
+                    kategori = 'diger'
+                
+                beden_haritasi[urun_adi] = {
+                    'sizes': bedenler,
+                    'category': kategori,
+                    'original_range': beden_araligi
+                }
+        
+        logger.info(f"Beden haritası yüklendi: {len(beden_haritasi)} ürün")
+        return beden_haritasi
+    except Exception as e:
+        logger.error(f"Beden haritası yüklenirken hata: {e}")
+        return {}
+
+# Global değişken olarak yükle
+BEDEN_HARITASI = load_beden_haritasi()
+
 # Strategy configurations
 STRATEGY_CONFIG = {
     'sakin': {
@@ -55,7 +112,9 @@ class MagazaTransferSistemi:
         self.mevcut_analiz = None
         self.current_strategy = 'sakin'
         self.excluded_stores = []
-        self.load_from_temp()  # Session'dan veri yükle
+        self.target_store = None  # Alan mağaza seçimi için
+        self.transfer_type = 'global'  # 'global', 'targeted', 'size_completion'
+        self.load_from_temp()
 
     def save_to_temp(self):
         """Veriyi geçici dosyaya kaydet"""
@@ -66,7 +125,9 @@ class MagazaTransferSistemi:
                     'magazalar': self.magazalar,
                     'mevcut_analiz': self.mevcut_analiz,
                     'current_strategy': self.current_strategy,
-                    'excluded_stores': self.excluded_stores
+                    'excluded_stores': self.excluded_stores,
+                    'target_store': self.target_store,
+                    'transfer_type': self.transfer_type
                 }, f)
             logger.info("Data saved to temp file")
         except Exception as e:
@@ -83,6 +144,8 @@ class MagazaTransferSistemi:
                     self.mevcut_analiz = temp_data.get('mevcut_analiz')
                     self.current_strategy = temp_data.get('current_strategy', 'sakin')
                     self.excluded_stores = temp_data.get('excluded_stores', [])
+                    self.target_store = temp_data.get('target_store')
+                    self.transfer_type = temp_data.get('transfer_type', 'global')
                 logger.info("Data loaded from temp file")
         except Exception as e:
             logger.error(f"Failed to load temp data: {e}")
@@ -95,6 +158,8 @@ class MagazaTransferSistemi:
             self.mevcut_analiz = None
             self.current_strategy = 'sakin'
             self.excluded_stores = []
+            self.target_store = None
+            self.transfer_type = 'global'
             
             # Geçici dosyayı da sil
             if os.path.exists(TEMP_DATA_FILE):
@@ -142,7 +207,7 @@ class MagazaTransferSistemi:
                 'sutunlar': list(df.columns)
             }
             
-            self.save_to_temp()  # Veriyi kaydet
+            self.save_to_temp()
             return True, result
             
         except Exception as e:
@@ -252,6 +317,248 @@ class MagazaTransferSistemi:
         
         return True, f"STR: A{detaylar['alan_str']}%>G{detaylar['gonderen_str']}%, T:{transfer_miktari}"
 
+    def get_urun_beden_araligi(self, urun_adi):
+        """Ürün için beden aralığını beden haritasından al"""
+        urun_adi_upper = urun_adi.strip().upper()
+        if urun_adi_upper in BEDEN_HARITASI:
+            return BEDEN_HARITASI[urun_adi_upper]['sizes']
+        return None
+
+    def beden_tamamlama_analizi_yap(self, target_store, strategy='sakin', excluded_stores=None):
+        """Beden tamamlama analizi - Hedef mağaza için eksik bedenleri tespit et ve transfer öner"""
+        if self.data is None:
+            return None
+
+        self.current_strategy = strategy
+        self.target_store = target_store
+        self.transfer_type = 'size_completion'
+        if excluded_stores is None:
+            excluded_stores = []
+        self.excluded_stores = excluded_stores
+
+        logger.info(f"Beden tamamlama analizi başlatılıyor... Hedef: {target_store}, Strateji: {strategy}")
+        
+        transferler = []
+        
+        # Hedef mağazanın ürünlerini al
+        target_data = self.data[self.data['Depo Adı'] == target_store]
+        
+        if target_data.empty:
+            logger.warning(f"Hedef mağaza '{target_store}' için veri bulunamadı")
+            return None
+
+        # Her ürün için analiz
+        for urun_adi in target_data['Ürün Adı'].unique():
+            # Beden haritasından tam aralığı al
+            tam_beden_araligi = self.get_urun_beden_araligi(urun_adi)
+            if not tam_beden_araligi:
+                continue  # Bu ürün için beden haritası yok
+            
+            # Hedef mağazadaki mevcut bedenleri al
+            urun_data_target = target_data[target_data['Ürün Adı'] == urun_adi]
+            mevcut_bedenler = []
+            
+            for _, row in urun_data_target.iterrows():
+                beden = str(row.get('Beden', '')).strip()
+                if beden and beden != 'nan':
+                    mevcut_bedenler.append(beden)
+            
+            # Eksik bedenleri tespit et
+            eksik_bedenler = [b for b in tam_beden_araligi if b not in mevcut_bedenler]
+            
+            # Her eksik beden için transfer analizi
+            for eksik_beden in eksik_bedenler:
+                # Diğer mağazalarda bu ürün+beden kombinasyonunu ara
+                diger_magazalar_data = self.data[
+                    (self.data['Depo Adı'] != target_store) &
+                    (self.data['Ürün Adı'] == urun_adi) &
+                    (self.data['Beden'].astype(str).str.strip() == eksik_beden) &
+                    (~self.data['Depo Adı'].isin(excluded_stores))
+                ]
+                
+                for _, gonderen_row in diger_magazalar_data.iterrows():
+                    gonderen_magaza = gonderen_row['Depo Adı']
+                    gonderen_satis = gonderen_row['Satis']
+                    gonderen_envanter = gonderen_row['Envanter']
+                    
+                    # Hedef mağaza için bu beden için STR hesapla (diğer bedenlerden ortalama)
+                    hedef_benzer_bedenler = target_data[
+                        (target_data['Ürün Adı'] == urun_adi) &
+                        (target_data['Beden'].astype(str).str.strip().isin(mevcut_bedenler))
+                    ]
+                    
+                    if hedef_benzer_bedenler.empty:
+                        # Bu ürün hiç yok hedef mağazada, 0 kabul et
+                        alan_satis = 0
+                        alan_envanter = 0
+                    else:
+                        # Benzer bedenlerin ortalamasını al
+                        alan_satis = hedef_benzer_bedenler['Satis'].mean()
+                        alan_envanter = 0  # Beden tamamlama için envanter 0 olmalı
+                    
+                    # Beden tamamlama koşulları kontrolü
+                    if gonderen_envanter <= 0:
+                        continue
+                    
+                    # Basit transfer koşulu: gönderen mağazada var, hedefte yok
+                    if alan_envanter == 0 and gonderen_envanter > 0:
+                        # Transfer miktarını hesapla
+                        config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
+                        transfer_miktari = min(gonderen_envanter, config.get('max_transfer', 99) or 99)
+                        transfer_miktari = max(1, transfer_miktari)
+                        
+                        transferler.append({
+                            'urun_adi': urun_adi,
+                            'renk': gonderen_row.get('Renk Açıklaması', ''),
+                            'beden': eksik_beden,
+                            'gonderen_magaza': gonderen_magaza,
+                            'alan_magaza': target_store,
+                            'transfer_miktari': int(transfer_miktari),
+                            'gonderen_satis': int(gonderen_satis),
+                            'gonderen_envanter': int(gonderen_envanter),
+                            'alan_satis': int(alan_satis),
+                            'alan_envanter': 0,  # Eksik beden için 0
+                            'transfer_tipi': 'beden_tamamlama',
+                            'eksik_beden': True,
+                            'kullanilan_strateji': strategy
+                        })
+
+        logger.info(f"Beden tamamlama analizi tamamlandı: {len(transferler)} transfer önerisi")
+        
+        result = {
+            'analiz_tipi': 'beden_tamamlama',
+            'strateji': strategy,
+            'target_store': target_store,
+            'excluded_stores': excluded_stores,
+            'transferler': transferler,
+            'toplam_eksik_beden': len(transferler)
+        }
+        
+        self.save_to_temp()
+        return result
+
+    def targeted_transfer_analizi_yap(self, target_store, strategy='sakin', excluded_stores=None):
+        """Spesifik mağaza için transfer analizi - Sadece bu mağazayı alan olarak analiz et"""
+        if self.data is None:
+            return None
+
+        self.current_strategy = strategy
+        self.target_store = target_store
+        self.transfer_type = 'targeted'
+        if excluded_stores is None:
+            excluded_stores = []
+        self.excluded_stores = excluded_stores
+
+        logger.info(f"Spesifik mağaza analizi başlatılıyor... Hedef: {target_store}, Strateji: {strategy}")
+        
+        config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
+        transferler = []
+        
+        # Hedef mağazanın verilerini al
+        target_data = self.data[self.data['Depo Adı'] == target_store]
+        
+        if target_data.empty:
+            logger.warning(f"Hedef mağaza '{target_store}' için veri bulunamadı")
+            return None
+
+        # Diğer mağazalardan bu mağazaya transfer analizi
+        diger_magazalar = [m for m in self.magazalar if m != target_store and m not in excluded_stores]
+        
+        # Her ürün için analiz
+        tum_data = self.data.copy()
+        tum_data['urun_anahtari'] = tum_data.apply(
+            lambda x: self.urun_anahtari_olustur(
+                x['Ürün Adı'], 
+                x.get('Renk Açıklaması', ''), 
+                x.get('Beden', '')
+            ), axis=1
+        )
+        
+        # Hedef mağazadaki ürünleri al
+        target_urun_anahtarlari = target_data.apply(
+            lambda x: self.urun_anahtari_olustur(
+                x['Ürün Adı'], 
+                x.get('Renk Açıklaması', ''), 
+                x.get('Beden', '')
+            ), axis=1
+        ).unique()
+
+        for urun_anahtari in target_urun_anahtari:
+            # Hedef mağazadaki bu ürünün verilerini al
+            target_urun_data = target_data[
+                target_data.apply(lambda x: self.urun_anahtari_olustur(
+                    x['Ürün Adı'], x.get('Renk Açıklaması', ''), x.get('Beden', '')
+                ), axis=1) == urun_anahtari
+            ]
+            
+            if target_urun_data.empty:
+                continue
+                
+            target_row = target_urun_data.iloc[0]
+            alan_satis = target_row['Satis']
+            alan_envanter = target_row['Envanter']
+            
+            # Diğer mağazalarda aynı ürünü ara
+            for gonderen_magaza in diger_magazalar:
+                gonderen_urun_data = tum_data[
+                    (tum_data['Depo Adı'] == gonderen_magaza) &
+                    (tum_data['urun_anahtari'] == urun_anahtari)
+                ]
+                
+                if gonderen_urun_data.empty:
+                    continue
+                    
+                gonderen_row = gonderen_urun_data.iloc[0]
+                gonderen_satis = gonderen_row['Satis']
+                gonderen_envanter = gonderen_row['Envanter']
+                
+                # Transfer koşullarını kontrol et
+                kosul_sonuc, kosul_mesaj = self.transfer_kosulları_kontrol(
+                    gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy
+                )
+                
+                if kosul_sonuc:
+                    transfer_miktari, str_detaylar = self.str_bazli_transfer_hesapla(
+                        gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy
+                    )
+                    
+                    if transfer_miktari > 0:
+                        transferler.append({
+                            'urun_anahtari': urun_anahtari,
+                            'urun_kodu': gonderen_row['Ürün Kodu'],
+                            'urun_adi': gonderen_row['Ürün Adı'],
+                            'renk': gonderen_row.get('Renk Açıklaması', ''),
+                            'beden': gonderen_row.get('Beden', ''),
+                            'gonderen_magaza': gonderen_magaza,
+                            'alan_magaza': target_store,
+                            'transfer_miktari': int(transfer_miktari),
+                            'gonderen_satis': int(gonderen_satis),
+                            'gonderen_envanter': int(gonderen_envanter),
+                            'alan_satis': int(alan_satis),
+                            'alan_envanter': int(alan_envanter),
+                            'gonderen_str': str_detaylar['gonderen_str'],
+                            'alan_str': str_detaylar['alan_str'],
+                            'str_farki': str_detaylar['str_farki'],
+                            'kullanilan_strateji': strategy,
+                            'transfer_tipi': 'targeted'
+                        })
+
+        # STR farkına göre sırala
+        transferler.sort(key=lambda x: x['str_farki'], reverse=True)
+        
+        logger.info(f"Spesifik mağaza analizi tamamlandı: {len(transferler)} transfer önerisi")
+        
+        result = {
+            'analiz_tipi': 'targeted',
+            'strateji': strategy,
+            'target_store': target_store,
+            'excluded_stores': excluded_stores,
+            'transferler': transferler
+        }
+        
+        self.save_to_temp()
+        return result
+
     def global_transfer_analizi_yap(self, strategy='sakin', excluded_stores=None):
         """Global ürün bazlı transfer analizi - Strategy ve excluded_stores parametreli"""
         if self.data is None:
@@ -259,6 +566,7 @@ class MagazaTransferSistemi:
 
         # Strategy'yi kaydet
         self.current_strategy = strategy
+        self.transfer_type = 'global'
         if excluded_stores is None:
             excluded_stores = []
         self.excluded_stores = excluded_stores
@@ -438,7 +746,7 @@ class MagazaTransferSistemi:
             'transfer_gereksiz': transfer_gereksiz
         }
         
-        self.save_to_temp()  # Analiz sonucunu kaydet
+        self.save_to_temp()
         return result
 
 # Global sistem instance
@@ -453,13 +761,17 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'service': 'RetailFlow Transfer API',
-        'version': '5.2.0',
+        'version': '6.0.0',
         'timestamp': datetime.now().isoformat(),
         'data_loaded': sistem.data is not None,
         'store_count': len(sistem.magazalar) if sistem.magazalar else 0,
         'current_strategy': sistem.current_strategy,
+        'transfer_type': sistem.transfer_type,
+        'target_store': sistem.target_store,
         'excluded_stores': sistem.excluded_stores,
-        'available_strategies': list(STRATEGY_CONFIG.keys())
+        'available_strategies': list(STRATEGY_CONFIG.keys()),
+        'beden_haritasi_loaded': len(BEDEN_HARITASI) > 0,
+        'beden_haritasi_count': len(BEDEN_HARITASI)
     })
 
 @app.route('/upload', methods=['POST'])
@@ -544,7 +856,7 @@ def remove_file():
 
 @app.route('/analyze', methods=['POST'])
 def analyze_data():
-    """Global STR transfer analizi - Strategy ve excluded_stores parametreli"""
+    """Transfer analizi - Global, Targeted veya Size Completion"""
     try:
         logger.info("Analysis request received")
         
@@ -552,47 +864,66 @@ def analyze_data():
             logger.warning("No data available for analysis")
             return jsonify({'error': 'Önce bir dosya yükleyin'}), 400
         
-        # Strategy ve excluded_stores parametrelerini al
+        # Request parametrelerini al
         request_data = request.get_json() or {}
         strategy = request_data.get('strategy', 'sakin')
         excluded_stores = request_data.get('excluded_stores', [])
+        transfer_type = request_data.get('transfer_type', 'global')  # global, targeted, size_completion
+        target_store = request_data.get('target_store', None)
         
-        # Strategy geçerliliğini kontrol et
+        # Parametreleri validate et
         if strategy not in STRATEGY_CONFIG:
             logger.warning(f"Invalid strategy: {strategy}")
             strategy = 'sakin'
         
-        # Excluded stores listesini temizle
         if not isinstance(excluded_stores, list):
             excluded_stores = []
         
         # Excluded stores'ları mevcut mağaza listesiyle filtrele
         valid_excluded_stores = [store for store in excluded_stores if store in sistem.magazalar]
         
-        logger.info(f"Starting global STR transfer analysis... Strategy: {strategy}")
+        logger.info(f"Starting {transfer_type} analysis... Strategy: {strategy}")
+        logger.info(f"Target store: {target_store}")
         logger.info(f"Excluded stores: {valid_excluded_stores}")
         
-        # ORIJINAL ANALİZ ALGORITMASINI ÇALIŞTIR - Strategy ve excluded_stores parametreli
-        results = sistem.global_transfer_analizi_yap(strategy, valid_excluded_stores)
+        # Transfer tipine göre analiz yap
+        if transfer_type == 'size_completion':
+            if not target_store or target_store not in sistem.magazalar:
+                return jsonify({'error': 'Beden tamamlama için geçerli bir hedef mağaza seçin'}), 400
+            
+            results = sistem.beden_tamamlama_analizi_yap(target_store, strategy, valid_excluded_stores)
+        
+        elif transfer_type == 'targeted':
+            if not target_store or target_store not in sistem.magazalar:
+                return jsonify({'error': 'Spesifik mağaza analizi için geçerli bir hedef mağaza seçin'}), 400
+            
+            results = sistem.targeted_transfer_analizi_yap(target_store, strategy, valid_excluded_stores)
+        
+        else:  # global
+            results = sistem.global_transfer_analizi_yap(strategy, valid_excluded_stores)
         
         if results:
             sistem.mevcut_analiz = results
             
-            # SADECE İLK 50 TRANSFER ÖNERİSİNİ GÖNDER (JSON boyutunu küçült)
+            # Sonuçları limitli şekilde gönder (JSON boyutunu küçült)
             limited_results = {
                 'analiz_tipi': results['analiz_tipi'],
                 'strateji': results['strateji'],
-                'strateji_parametreleri': results['strateji_parametreleri'],
-                'excluded_stores': results['excluded_stores'],
-                'excluded_count': results['excluded_count'],
-                'magaza_metrikleri': results['magaza_metrikleri'],
-                'transferler': results['transferler'][:50],  # İlk 50 tane
-                'transfer_gereksiz': results['transfer_gereksiz'][:20],  # İlk 20 tane
-                'toplam_transfer_sayisi': len(results['transferler']),
-                'toplam_gereksiz_sayisi': len(results['transfer_gereksiz'])
+                'target_store': results.get('target_store'),
+                'excluded_stores': results.get('excluded_stores', []),
+                'excluded_count': results.get('excluded_count', 0),
+                'transferler': results['transferler'][:50] if results.get('transferler') else [],
+                'toplam_transfer_sayisi': len(results.get('transferler', []))
             }
             
-            logger.info(f"Analysis completed ({strategy}): {len(results['transferler'])} total transfers")
+            # Global analiz için ek bilgiler
+            if transfer_type == 'global':
+                limited_results['strateji_parametreleri'] = results.get('strateji_parametreleri')
+                limited_results['magaza_metrikleri'] = results.get('magaza_metrikleri')
+                limited_results['transfer_gereksiz'] = results.get('transfer_gereksiz', [])[:20]
+                limited_results['toplam_gereksiz_sayisi'] = len(results.get('transfer_gereksiz', []))
+            
+            logger.info(f"{transfer_type.capitalize()} analysis completed ({strategy}): {len(results.get('transferler', []))} total transfers")
             if valid_excluded_stores:
                 logger.info(f"Excluded {len(valid_excluded_stores)} stores from analysis")
             
@@ -610,7 +941,7 @@ def analyze_data():
 
 @app.route('/export/excel', methods=['POST'])
 def export_excel():
-    """Excel export - Özelleştirilmiş sütunlar"""
+    """Excel export - Transfer tipine göre özelleştirilmiş"""
     try:
         logger.info("Excel export request received")
         
@@ -619,96 +950,83 @@ def export_excel():
             return jsonify({'error': 'Analiz sonucu bulunamadı'}), 400
         
         transferler = sistem.mevcut_analiz['transferler']
-        transfer_gereksiz = sistem.mevcut_analiz.get('transfer_gereksiz', [])
+        analiz_tipi = sistem.mevcut_analiz.get('analiz_tipi', 'global')
         strategy = sistem.mevcut_analiz.get('strateji', 'sakin')
+        target_store = sistem.mevcut_analiz.get('target_store', '')
         
-        logger.info(f"Exporting {len(transferler)} transfers to Excel (Strategy: {strategy})")
+        logger.info(f"Exporting {len(transferler)} transfers to Excel (Type: {analiz_tipi}, Strategy: {strategy})")
         
         # Excel dosyası oluştur
         output = io.BytesIO()
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Transfer önerileri sayfası
+            # Ana transfer sayfası
             if transferler:
                 df_transfer = pd.DataFrame(transferler)
                 
-                # SADECE İSTENEN SÜTUNLARI SEÇ VE YENİDEN ADLANDIR
-                selected_columns = {
-                    'urun_kodu': 'Ürün Kodu',
-                    'urun_adi': 'Ürün Adı', 
-                    'renk': 'Renk',
-                    'beden': 'Beden',
-                    'gonderen_magaza': 'Gönderen Mağaza',
-                    'alan_magaza': 'Alan Mağaza',
-                    'transfer_miktari': 'Transfer Miktarı',
-                    'gonderen_satis': 'Gönderen Satış',
-                    'gonderen_envanter': 'Gönderen Envanter',
-                    'alan_satis': 'Alan Satış',
-                    'alan_envanter': 'Alan Envanter',
-                    'str_farki': 'STR Farkı (%)',
-                    'kullanilan_strateji': 'Kullanılan Strateji'
-                }
+                # Temel sütunlar
+                if analiz_tipi == 'size_completion':
+                    selected_columns = {
+                        'urun_adi': 'Ürün Adı',
+                        'renk': 'Renk',
+                        'beden': 'Eksik Beden',
+                        'gonderen_magaza': 'Gönderen Mağaza',
+                        'alan_magaza': 'Hedef Mağaza',
+                        'transfer_miktari': 'Transfer Miktarı',
+                        'gonderen_envanter': 'Gönderen Envanter',
+                        'kullanilan_strateji': 'Strateji'
+                    }
+                    sheet_name = f'{target_store} Beden Tamamlama'
+                else:
+                    selected_columns = {
+                        'urun_kodu': 'Ürün Kodu',
+                        'urun_adi': 'Ürün Adı',
+                        'renk': 'Renk',
+                        'beden': 'Beden',
+                        'gonderen_magaza': 'Gönderen Mağaza',
+                        'alan_magaza': 'Alan Mağaza',
+                        'transfer_miktari': 'Transfer Miktarı',
+                        'str_farki': 'STR Farkı (%)',
+                        'kullanilan_strateji': 'Strateji'
+                    }
+                    sheet_name = f'{target_store} Transferleri' if analiz_tipi == 'targeted' else 'Transfer Önerileri'
                 
-                # Sadece seçilen sütunları al
-                df_export = df_transfer[list(selected_columns.keys())].copy()
+                # Mevcut sütunları filtrele
+                available_columns = {k: v for k, v in selected_columns.items() if k in df_transfer.columns}
+                df_export = df_transfer[list(available_columns.keys())].copy()
+                df_export = df_export.rename(columns=available_columns)
                 
-                # Sütun isimlerini değiştir
-                df_export = df_export.rename(columns=selected_columns)
-                
-                # Excel'e yaz
-                df_export.to_excel(writer, index=False, sheet_name='Transfer Önerileri')
+                df_export.to_excel(writer, index=False, sheet_name=sheet_name[:31])  # Excel sheet name limit
             
-            # Transfer gerekmeyen ürünler sayfası
-            if transfer_gereksiz:
-                df_gereksiz = pd.DataFrame(transfer_gereksiz)
-                gereksiz_mapping = {
-                    'urun_adi': 'Ürün Adı',
-                    'renk': 'Renk',
-                    'beden': 'Beden',
-                    'magaza_sayisi': 'Mevcut Mağaza Sayısı',
-                    'ortalama_str': 'Ortalama STR (%)',
-                    'str_fark': 'STR Farkı (%)',
-                    'red_nedeni': 'Transfer Yapılmama Nedeni'
-                }
-                mevcut_gereksiz_mapping = {k: v for k, v in gereksiz_mapping.items() if k in df_gereksiz.columns}
-                df_gereksiz = df_gereksiz.rename(columns=mevcut_gereksiz_mapping)
-                gereksiz_kolonlar = list(mevcut_gereksiz_mapping.values())
-                df_gereksiz = df_gereksiz[gereksiz_kolonlar]
-                df_gereksiz.to_excel(writer, index=False, sheet_name='Transfer Gerekmeyen')
-            
-            # Mağaza metrikleri sayfası
-            if sistem.mevcut_analiz['magaza_metrikleri']:
-                df_metrikler = pd.DataFrame(sistem.mevcut_analiz['magaza_metrikleri']).T
-                df_metrikler.to_excel(writer, sheet_name='Mağaza Metrikleri')
-            
-            # İstisna mağaza bilgileri sayfası
-            if sistem.excluded_stores:
-                excluded_info = {
-                    'İstisna Mağaza': sistem.excluded_stores,
-                    'Durum': ['Transferden Hariç'] * len(sistem.excluded_stores),
-                    'Açıklama': ['Bu mağaza ne gönderen ne alan olarak kullanılmıyor'] * len(sistem.excluded_stores)
-                }
-                df_excluded = pd.DataFrame(excluded_info)
-                df_excluded.to_excel(writer, index=False, sheet_name='İstisna Mağazalar')
-            
-            # Strateji bilgileri sayfası
-            strategy_info = {
+            # Analiz özeti sayfası
+            summary_info = {
+                'Analiz Tipi': [analiz_tipi.upper()],
                 'Kullanılan Strateji': [strategy],
-                'Açıklama': [STRATEGY_CONFIG[strategy]['description']],
-                'Minimum STR Farkı (%)': [STRATEGY_CONFIG[strategy]['min_str_diff'] * 100],
-                'Minimum Envanter': [STRATEGY_CONFIG[strategy]['min_inventory']],
-                'Maksimum Transfer': [STRATEGY_CONFIG[strategy]['max_transfer'] or 'Sınırsız'],
-                'İstisna Mağaza Sayısı': [len(sistem.excluded_stores)]
+                'Hedef Mağaza': [target_store or 'Tüm Mağazalar'],
+                'Toplam Transfer': [len(transferler)],
+                'İstisna Mağaza Sayısı': [len(sistem.excluded_stores)],
+                'Analiz Tarihi': [datetime.now().strftime('%Y-%m-%d %H:%M')]
             }
-            df_strategy = pd.DataFrame(strategy_info)
-            df_strategy.to_excel(writer, index=False, sheet_name='Strateji Bilgileri')
+            
+            if sistem.excluded_stores:
+                summary_info['İstisna Mağazalar'] = [', '.join(sistem.excluded_stores)]
+            
+            df_summary = pd.DataFrame(summary_info)
+            df_summary.to_excel(writer, index=False, sheet_name='Analiz Özeti')
         
         output.seek(0)
         
-        # Dosya adı
+        # Dosya adı oluştur
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        excluded_suffix = f"_exc{len(sistem.excluded_stores)}" if sistem.excluded_stores else ""
-        filename = f'transfer_{strategy}{excluded_suffix}_{timestamp}.xlsx'
+        if analiz_tipi == 'size_completion':
+            filename = f'beden_tamamlama_{target_store}_{strategy}_{timestamp}.xlsx'
+        elif analiz_tipi == 'targeted':
+            filename = f'targeted_{target_store}_{strategy}_{timestamp}.xlsx'
+        else:
+            filename = f'global_transfer_{strategy}_{timestamp}.xlsx'
+        
+        # Dosya adını temizle (Windows uyumluluğu için)
+        filename = "".join(c for c in filename if c.isalnum() or c in (' ', '-', '_', '.')).rstrip()
         
         logger.info(f"Excel file created: {filename}")
         
@@ -722,40 +1040,6 @@ def export_excel():
     except Exception as e:
         logger.error(f"Export error: {str(e)}")
         return jsonify({'error': f'Export hatası: {str(e)}'}), 500
-
-@app.route('/template', methods=['GET'])
-def download_template():
-    """Template dosyası indirme"""
-    try:
-        # Sample template data
-        template_data = {
-            'Depo Adı': ['MAĞAZA A', 'MAĞAZA A', 'MAĞAZA B', 'MAĞAZA B'],
-            'Ürün Kodu': ['URN001', 'URN002', 'URN001', 'URN002'],
-            'Ürün Adı': ['T-Shirt', 'Pantolon', 'T-Shirt', 'Pantolon'],
-            'Renk Açıklaması': ['Kırmızı', 'Mavi', 'Kırmızı', 'Mavi'],
-            'Beden': ['M', 'L', 'M', 'L'],
-            'Satis': [10, 5, 15, 8],
-            'Envanter': [20, 25, 10, 12]
-        }
-        
-        df_template = pd.DataFrame(template_data)
-        output = io.BytesIO()
-        
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_template.to_excel(writer, index=False, sheet_name='Örnek Veri')
-        
-        output.seek(0)
-        
-        return send_file(
-            output,
-            as_attachment=True,
-            download_name='retailflow_template.xlsx',
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-        
-    except Exception as e:
-        logger.error(f"Template download error: {str(e)}")
-        return jsonify({'error': f'Template indirme hatası: {str(e)}'}), 500
 
 @app.route('/stores', methods=['GET'])
 def get_stores():
@@ -805,7 +1089,9 @@ def get_strategies():
         return jsonify({
             'success': True,
             'strategies': strategies,
-            'current_strategy': sistem.current_strategy
+            'current_strategy': sistem.current_strategy,
+            'transfer_type': sistem.transfer_type,
+            'target_store': sistem.target_store
         })
         
     except Exception as e:
@@ -829,5 +1115,6 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('FLASK_ENV') != 'production'
     
-    logger.info(f"Starting RetailFlow API on port {port}")
+    logger.info(f"Starting RetailFlow API v6.0 on port {port}")
+    logger.info(f"Beden haritası yüklendi: {len(BEDEN_HARITASI)} ürün")
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
