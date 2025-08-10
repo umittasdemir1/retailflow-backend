@@ -367,49 +367,55 @@ class MagazaTransferSistemi:
             logger.warning(f"Hedef mağaza '{target_store}' için veri bulunamadı")
             return None
 
-        # Her ürün için analiz
-        for urun_adi in target_data['Ürün Adı'].unique():
-            logger.info(f"Analiz ediliyor: {urun_adi}")
+        # DÜZELTME: Hedef mağaza yerine TÜM ÜRÜNLER için analiz yap
+        logger.info(f"Beden haritasındaki {len(BEDEN_HARITASI)} ürün kontrol ediliyor...")
+        
+        # Her ürün için analiz (beden haritasındaki tüm ürünler)
+        for json_urun_adi, beden_info in BEDEN_HARITASI.items():
+            if json_urun_adi == 'ÜRÜN ADI':  # Header skip
+                continue
+                
+            tam_beden_araligi = beden_info['sizes']
+            logger.info(f"Analiz ediliyor: {json_urun_adi} - Tam aralık: {tam_beden_araligi}")
             
-            # Beden haritasından tam aralığı al
-            tam_beden_araligi = self.get_urun_beden_araligi(urun_adi)
-            if not tam_beden_araligi:
-                logger.warning(f"Beden haritasında bulunamadı: {urun_adi}")
-                continue  # Bu ürün için beden haritası yok
+            # Bu ürünün hedef mağazadaki durumunu kontrol et
+            hedef_urun_data = target_data[target_data['Ürün Adı'].str.upper().str.contains(json_urun_adi, na=False)]
             
-            logger.info(f"{urun_adi} için tam beden aralığı: {tam_beden_araligi}")
-            
-            # Hedef mağazadaki mevcut bedenleri al
-            urun_data_target = target_data[target_data['Ürün Adı'] == urun_adi]
+            # Hedef mağazadaki mevcut bedenleri tespit et
             mevcut_bedenler = []
+            if not hedef_urun_data.empty:
+                for _, row in hedef_urun_data.iterrows():
+                    beden = str(row.get('Beden', '')).strip()
+                    if beden and beden != 'nan':
+                        mevcut_bedenler.append(beden)
             
-            for _, row in urun_data_target.iterrows():
-                beden = str(row.get('Beden', '')).strip()
-                if beden and beden != 'nan':
-                    mevcut_bedenler.append(beden)
-            
-            logger.info(f"{urun_adi} - Hedef mağazada mevcut bedenler: {mevcut_bedenler}")
+            logger.info(f"{json_urun_adi} - Hedef mağazada mevcut bedenler: {mevcut_bedenler}")
             
             # Eksik bedenleri tespit et
             eksik_bedenler = [b for b in tam_beden_araligi if b not in mevcut_bedenler]
-            logger.info(f"{urun_adi} - Eksik bedenler: {eksik_bedenler}")
+            logger.info(f"{json_urun_adi} - Eksik bedenler: {eksik_bedenler}")
+            
+            # Eğer hiç ürün yoksa hedef mağazada, tüm bedenler eksik
+            if hedef_urun_data.empty:
+                logger.info(f"{json_urun_adi} hedef mağazada hiç yok - tüm bedenler eksik")
+                eksik_bedenler = tam_beden_araligi
             
             # Her eksik beden için EN İYİ transfer kaynağını bul
             for eksik_beden in eksik_bedenler:
-                logger.info(f"Eksik beden analizi: {urun_adi} - {eksik_beden}")
+                logger.info(f"Eksik beden analizi: {json_urun_adi} - {eksik_beden}")
                 
                 # Diğer mağazalarda bu ürün+beden kombinasyonunu ara
                 diger_magazalar_data = self.data[
                     (self.data['Depo Adı'] != target_store) &
-                    (self.data['Ürün Adı'] == urun_adi) &
+                    (self.data['Ürün Adı'].str.upper().str.contains(json_urun_adi, na=False)) &
                     (self.data['Beden'].astype(str).str.strip() == eksik_beden) &
                     (~self.data['Depo Adı'].isin(excluded_stores))
                 ]
                 
-                logger.info(f"{eksik_beden} bedeni için {len(diger_magazalar_data)} mağaza bulundu")
+                logger.info(f"{json_urun_adi} - {eksik_beden} bedeni için {len(diger_magazalar_data)} mağaza bulundu")
                 
                 if diger_magazalar_data.empty:
-                    logger.warning(f"Eksik beden hiçbir mağazada yok: {urun_adi} - {eksik_beden}")
+                    logger.warning(f"Eksik beden hiçbir mağazada yok: {json_urun_adi} - {eksik_beden}")
                     continue
                 
                 # EN YÜKSEK ENVANTERLI mağazayı bul
@@ -426,18 +432,19 @@ class MagazaTransferSistemi:
                 if en_iyi_magaza is not None and en_yuksek_envanter > 0:
                     gonderen_magaza = en_iyi_magaza['Depo Adı']
                     gonderen_satis = en_iyi_magaza['Satis']
+                    gercek_urun_adi = en_iyi_magaza['Ürün Adı']  # Gerçek ürün adını al
                     
-                    logger.info(f"Transfer önerisi: {gonderen_magaza} → {target_store} | {urun_adi} {eksik_beden} | Envanter: {en_yuksek_envanter}")
+                    logger.info(f"Transfer önerisi: {gonderen_magaza} → {target_store} | {gercek_urun_adi} {eksik_beden} | Envanter: {en_yuksek_envanter}")
                     
                     # Hedef mağaza için ortalama satış hesapla
-                    if not urun_data_target.empty:
-                        alan_satis = urun_data_target['Satis'].mean()
+                    if not hedef_urun_data.empty:
+                        alan_satis = hedef_urun_data['Satis'].mean()
                     else:
                         alan_satis = 0
                     
                     # Transfer kaydı oluştur
                     transferler.append({
-                        'urun_adi': urun_adi,
+                        'urun_adi': gercek_urun_adi,  # Gerçek ürün adı
                         'urun_kodu': en_iyi_magaza.get('Ürün Kodu', ''),
                         'renk': en_iyi_magaza.get('Renk Açıklaması', ''),
                         'beden': eksik_beden,
@@ -453,7 +460,7 @@ class MagazaTransferSistemi:
                         'kullanilan_strateji': 'yok'
                     })
                 else:
-                    logger.warning(f"Transfer için uygun mağaza bulunamadı: {urun_adi} - {eksik_beden}")
+                    logger.warning(f"Transfer için uygun mağaza bulunamadı: {json_urun_adi} - {eksik_beden}")
 
         logger.info(f"Beden tamamlama analizi tamamlandı: {len(transferler)} transfer önerisi")
         
