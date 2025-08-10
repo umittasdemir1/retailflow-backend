@@ -318,10 +318,31 @@ class MagazaTransferSistemi:
         return True, f"STR: A{detaylar['alan_str']}%>G{detaylar['gonderen_str']}%, T:{transfer_miktari}"
 
     def get_urun_beden_araligi(self, urun_adi):
-        """Ürün için beden aralığını beden haritasından al"""
+        """Ürün için beden aralığını beden haritasından al - AKILLI EŞLEŞTIRME"""
         urun_adi_upper = urun_adi.strip().upper()
+        
+        # 1. Tam eşleşme dene
         if urun_adi_upper in BEDEN_HARITASI:
+            logger.info(f"Tam eşleşme bulundu: {urun_adi_upper}")
             return BEDEN_HARITASI[urun_adi_upper]['sizes']
+        
+        # 2. Kısmi eşleşme dene (JSON'daki ürün adı, veri içinde geçiyor mu?)
+        for json_urun_adi, beden_info in BEDEN_HARITASI.items():
+            # JSON'daki ürün adı, gerçek ürün adının başında mı?
+            if json_urun_adi in urun_adi_upper and json_urun_adi != 'ÜRÜN ADI':
+                logger.info(f"Kısmi eşleşme bulundu: '{json_urun_adi}' -> '{urun_adi_upper}'")
+                return beden_info['sizes']
+        
+        # 3. Kelime bazlı eşleşme (ilk 2 kelime)
+        urun_kelimeleri = urun_adi_upper.split()
+        if len(urun_kelimeleri) >= 2:
+            ilk_iki_kelime = ' '.join(urun_kelimeleri[:2])
+            for json_urun_adi, beden_info in BEDEN_HARITASI.items():
+                if json_urun_adi == ilk_iki_kelime:
+                    logger.info(f"Kelime bazlı eşleşme: '{json_urun_adi}' -> '{urun_adi_upper}'")
+                    return beden_info['sizes']
+        
+        logger.warning(f"Beden haritasında eşleşme bulunamadı: {urun_adi_upper}")
         return None
 
     def beden_tamamlama_analizi_yap(self, target_store, excluded_stores=None):
