@@ -1,3 +1,4 @@
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import pandas as pd
 import os
@@ -99,7 +100,11 @@ STRATEGY_CONFIG = {
     'agresif': {
         'min_str_diff': 0.08,
         'min_inventory': 1,
-        'max_transfer': None,  # Sınırsız
+        'max_transfer':             # Aynı ürün+beden kombinasyonunu diğer mağazalarda ara
+            kaynak_magazalar = self.data[
+                (self.data['Depo Adı'] != target_store) &
+                (self.data['Ürün Adı'] == urun_adi) &
+                ,  # Sınırsız
         'description': 'Maksimum performans odaklı'
     }
 }
@@ -1154,4 +1159,3 @@ if __name__ == '__main__':
     logger.info(f"Starting RetailFlow API v6.0 on port {port}")
     logger.info(f"Beden haritası yüklendi: {len(BEDEN_HARITASI)} ürün")
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
-
