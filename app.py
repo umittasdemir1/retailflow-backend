@@ -324,19 +324,18 @@ class MagazaTransferSistemi:
             return BEDEN_HARITASI[urun_adi_upper]['sizes']
         return None
 
-    def beden_tamamlama_analizi_yap(self, target_store, strategy='sakin', excluded_stores=None):
-        """Beden tamamlama analizi - Hedef mağaza için eksik bedenleri tespit et ve transfer öner"""
+    def beden_tamamlama_analizi_yap(self, target_store, excluded_stores=None):
+        """Beden tamamlama analizi - Hedef mağaza için eksik bedenleri tespit et ve transfer öner (STRATEJİSİZ)"""
         if self.data is None:
             return None
 
-        self.current_strategy = strategy
         self.target_store = target_store
         self.transfer_type = 'size_completion'
         if excluded_stores is None:
             excluded_stores = []
         self.excluded_stores = excluded_stores
 
-        logger.info(f"Beden tamamlama analizi başlatılıyor... Hedef: {target_store}, Strateji: {strategy}")
+        logger.info(f"Beden tamamlama analizi başlatılıyor... Hedef: {target_store} (Strateji kullanılmıyor)")
         
         transferler = []
         
@@ -396,16 +395,14 @@ class MagazaTransferSistemi:
                         alan_satis = hedef_benzer_bedenler['Satis'].mean()
                         alan_envanter = 0  # Beden tamamlama için envanter 0 olmalı
                     
-                    # Beden tamamlama koşulları kontrolü
+                    # Beden tamamlama koşulları kontrolü (STRATEJİSİZ)
                     if gonderen_envanter <= 0:
                         continue
                     
                     # Basit transfer koşulu: gönderen mağazada var, hedefte yok
                     if alan_envanter == 0 and gonderen_envanter > 0:
-                        # Transfer miktarını hesapla
-                        config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
-                        transfer_miktari = min(gonderen_envanter, config.get('max_transfer', 99) or 99)
-                        transfer_miktari = max(1, transfer_miktari)
+                        # SABIT TRANSFER MİKTARI: Her zaman 1 adet (strateji yok)
+                        transfer_miktari = 1
                         
                         transferler.append({
                             'urun_adi': urun_adi,
@@ -413,21 +410,21 @@ class MagazaTransferSistemi:
                             'beden': eksik_beden,
                             'gonderen_magaza': gonderen_magaza,
                             'alan_magaza': target_store,
-                            'transfer_miktari': int(transfer_miktari),
+                            'transfer_miktari': transfer_miktari,
                             'gonderen_satis': int(gonderen_satis),
                             'gonderen_envanter': int(gonderen_envanter),
                             'alan_satis': int(alan_satis),
                             'alan_envanter': 0,  # Eksik beden için 0
                             'transfer_tipi': 'beden_tamamlama',
                             'eksik_beden': True,
-                            'kullanilan_strateji': strategy
+                            'kullanilan_strateji': 'yok'  # Strateji kullanılmıyor
                         })
 
-        logger.info(f"Beden tamamlama analizi tamamlandı: {len(transferler)} transfer önerisi")
+        logger.info(f"Beden tamamlama analizi tamamlandı: {len(transferler)} transfer önerisi (strateji kullanılmadı)")
         
         result = {
             'analiz_tipi': 'beden_tamamlama',
-            'strateji': strategy,
+            'strateji': 'beden_tamamlama',  # Özel değer
             'target_store': target_store,
             'excluded_stores': excluded_stores,
             'transferler': transferler,
@@ -483,7 +480,7 @@ class MagazaTransferSistemi:
             ), axis=1
         ).unique()
 
-        for urun_anahtari in target_urun_anahtari:
+        for urun_anahtari in target_urun_anahtarlari:
             # Hedef mağazadaki bu ürünün verilerini al
             target_urun_data = target_data[
                 target_data.apply(lambda x: self.urun_anahtari_olustur(
@@ -891,7 +888,8 @@ def analyze_data():
             if not target_store or target_store not in sistem.magazalar:
                 return jsonify({'error': 'Beden tamamlama için geçerli bir hedef mağaza seçin'}), 400
             
-            results = sistem.beden_tamamlama_analizi_yap(target_store, strategy, valid_excluded_stores)
+            # Beden tamamlama için strateji kullanılmaz
+            results = sistem.beden_tamamlama_analizi_yap(target_store, valid_excluded_stores)
         
         elif transfer_type == 'targeted':
             if not target_store or target_store not in sistem.magazalar:
