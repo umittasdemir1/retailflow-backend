@@ -325,7 +325,7 @@ class MagazaTransferSistemi:
         return None
 
     def beden_tamamlama_analizi_yap(self, target_store, excluded_stores=None):
-        """Beden tamamlama analizi - Hedef mağaza için eksik bedenleri tespit et ve transfer öner (STRATEJİSİZ)"""
+        """Beden tamamlama analizi - DÜZELTME: Her eksik beden için sadece EN YÜKSEK envanterli mağazadan transfer"""
         if self.data is None:
             return None
 
@@ -335,7 +335,7 @@ class MagazaTransferSistemi:
             excluded_stores = []
         self.excluded_stores = excluded_stores
 
-        logger.info(f"Beden tamamlama analizi başlatılıyor... Hedef: {target_store} (Strateji kullanılmıyor)")
+        logger.info(f"Beden tamamlama analizi başlatılıyor... Hedef: {target_store} (En yüksek envanter mantığı)")
         
         transferler = []
         
@@ -348,10 +348,15 @@ class MagazaTransferSistemi:
 
         # Her ürün için analiz
         for urun_adi in target_data['Ürün Adı'].unique():
+            logger.info(f"Analiz ediliyor: {urun_adi}")
+            
             # Beden haritasından tam aralığı al
             tam_beden_araligi = self.get_urun_beden_araligi(urun_adi)
             if not tam_beden_araligi:
+                logger.warning(f"Beden haritasında bulunamadı: {urun_adi}")
                 continue  # Bu ürün için beden haritası yok
+            
+            logger.info(f"{urun_adi} için tam beden aralığı: {tam_beden_araligi}")
             
             # Hedef mağazadaki mevcut bedenleri al
             urun_data_target = target_data[target_data['Ürün Adı'] == urun_adi]
@@ -362,11 +367,16 @@ class MagazaTransferSistemi:
                 if beden and beden != 'nan':
                     mevcut_bedenler.append(beden)
             
+            logger.info(f"{urun_adi} - Hedef mağazada mevcut bedenler: {mevcut_bedenler}")
+            
             # Eksik bedenleri tespit et
             eksik_bedenler = [b for b in tam_beden_araligi if b not in mevcut_bedenler]
+            logger.info(f"{urun_adi} - Eksik bedenler: {eksik_bedenler}")
             
-            # Her eksik beden için transfer analizi
+            # Her eksik beden için EN İYİ transfer kaynağını bul
             for eksik_beden in eksik_bedenler:
+                logger.info(f"Eksik beden analizi: {urun_adi} - {eksik_beden}")
+                
                 # Diğer mağazalarda bu ürün+beden kombinasyonunu ara
                 diger_magazalar_data = self.data[
                     (self.data['Depo Adı'] != target_store) &
@@ -375,56 +385,60 @@ class MagazaTransferSistemi:
                     (~self.data['Depo Adı'].isin(excluded_stores))
                 ]
                 
+                logger.info(f"{eksik_beden} bedeni için {len(diger_magazalar_data)} mağaza bulundu")
+                
+                if diger_magazalar_data.empty:
+                    logger.warning(f"Eksik beden hiçbir mağazada yok: {urun_adi} - {eksik_beden}")
+                    continue
+                
+                # EN YÜKSEK ENVANTERLI mağazayı bul
+                en_yuksek_envanter = 0
+                en_iyi_magaza = None
+                
                 for _, gonderen_row in diger_magazalar_data.iterrows():
-                    gonderen_magaza = gonderen_row['Depo Adı']
-                    gonderen_satis = gonderen_row['Satis']
                     gonderen_envanter = gonderen_row['Envanter']
+                    if gonderen_envanter > en_yuksek_envanter:
+                        en_yuksek_envanter = gonderen_envanter
+                        en_iyi_magaza = gonderen_row
+                
+                # En iyi mağaza bulunduysa transfer öner
+                if en_iyi_magaza is not None and en_yuksek_envanter > 0:
+                    gonderen_magaza = en_iyi_magaza['Depo Adı']
+                    gonderen_satis = en_iyi_magaza['Satis']
                     
-                    # Hedef mağaza için bu beden için STR hesapla (diğer bedenlerden ortalama)
-                    hedef_benzer_bedenler = target_data[
-                        (target_data['Ürün Adı'] == urun_adi) &
-                        (target_data['Beden'].astype(str).str.strip().isin(mevcut_bedenler))
-                    ]
+                    logger.info(f"Transfer önerisi: {gonderen_magaza} → {target_store} | {urun_adi} {eksik_beden} | Envanter: {en_yuksek_envanter}")
                     
-                    if hedef_benzer_bedenler.empty:
-                        # Bu ürün hiç yok hedef mağazada, 0 kabul et
-                        alan_satis = 0
-                        alan_envanter = 0
+                    # Hedef mağaza için ortalama satış hesapla
+                    if not urun_data_target.empty:
+                        alan_satis = urun_data_target['Satis'].mean()
                     else:
-                        # Benzer bedenlerin ortalamasını al
-                        alan_satis = hedef_benzer_bedenler['Satis'].mean()
-                        alan_envanter = 0  # Beden tamamlama için envanter 0 olmalı
+                        alan_satis = 0
                     
-                    # Beden tamamlama koşulları kontrolü (STRATEJİSİZ)
-                    if gonderen_envanter <= 0:
-                        continue
-                    
-                    # Basit transfer koşulu: gönderen mağazada var, hedefte yok
-                    if alan_envanter == 0 and gonderen_envanter > 0:
-                        # SABIT TRANSFER MİKTARI: Her zaman 1 adet (strateji yok)
-                        transfer_miktari = 1
-                        
-                        transferler.append({
-                            'urun_adi': urun_adi,
-                            'renk': gonderen_row.get('Renk Açıklaması', ''),
-                            'beden': eksik_beden,
-                            'gonderen_magaza': gonderen_magaza,
-                            'alan_magaza': target_store,
-                            'transfer_miktari': transfer_miktari,
-                            'gonderen_satis': int(gonderen_satis),
-                            'gonderen_envanter': int(gonderen_envanter),
-                            'alan_satis': int(alan_satis),
-                            'alan_envanter': 0,  # Eksik beden için 0
-                            'transfer_tipi': 'beden_tamamlama',
-                            'eksik_beden': True,
-                            'kullanilan_strateji': 'yok'  # Strateji kullanılmıyor
-                        })
+                    # Transfer kaydı oluştur
+                    transferler.append({
+                        'urun_adi': urun_adi,
+                        'urun_kodu': en_iyi_magaza.get('Ürün Kodu', ''),
+                        'renk': en_iyi_magaza.get('Renk Açıklaması', ''),
+                        'beden': eksik_beden,
+                        'gonderen_magaza': gonderen_magaza,
+                        'alan_magaza': target_store,
+                        'transfer_miktari': 1,  # Sabit 1 adet
+                        'gonderen_satis': int(gonderen_satis),
+                        'gonderen_envanter': int(en_yuksek_envanter),
+                        'alan_satis': int(alan_satis),
+                        'alan_envanter': 0,  # Eksik beden için 0
+                        'transfer_tipi': 'beden_tamamlama',
+                        'eksik_beden': True,
+                        'kullanilan_strateji': 'yok'
+                    })
+                else:
+                    logger.warning(f"Transfer için uygun mağaza bulunamadı: {urun_adi} - {eksik_beden}")
 
-        logger.info(f"Beden tamamlama analizi tamamlandı: {len(transferler)} transfer önerisi (strateji kullanılmadı)")
+        logger.info(f"Beden tamamlama analizi tamamlandı: {len(transferler)} transfer önerisi")
         
         result = {
             'analiz_tipi': 'beden_tamamlama',
-            'strateji': 'beden_tamamlama',  # Özel değer
+            'strateji': 'beden_tamamlama',
             'target_store': target_store,
             'excluded_stores': excluded_stores,
             'transferler': transferler,
