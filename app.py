@@ -48,13 +48,13 @@ STRATEGY_CONFIG = {
     'agresif': {
         'min_str_diff': 0.08,
         'min_inventory': 1,
-        'max_transfer': None,  # sinirsiz
+        'max_transfer': None,
         'description': 'Maksimum performans odakli'
     }
+}  # ← Burada kapatılmalı
 
-# Merkez/Online onceligi sabiti (bizim kural)
+# Merkez/Online onceligi sabiti
 WAREHOUSE_SET = {'Merkez Depo', 'Online'}
-}
 
 # Performance tracking decorator
 def measure_time(func):
