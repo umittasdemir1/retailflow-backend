@@ -610,7 +610,7 @@ class MagazaTransferSistemi:
             en_yuksek_str = magaza_str_listesi[-1]
 
             # Transfer koşullarını kontrol et - Strategy parametreli
-            kosul_sonuc, kosul_mesaj = self.transfer_koşulları_kontrol(
+            kosul_sonuc, kosul_mesaj = self.transfer_kosullari_kontrol(
                 en_dusuk_str['satis'], en_dusuk_str['envanter'], 
                 en_yuksek_str['satis'], en_yuksek_str['envanter'],
                 strategy
