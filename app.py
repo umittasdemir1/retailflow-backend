@@ -357,6 +357,7 @@ class MagazaTransferSistemi:
                 continue
             
             
+            
             # 6. GONDEREN SECIMI (Beden Tamamlama kurali)
             # Oncelikli depolar: Merkez Depo ve Online (SATIS'A BAKILMAYACAK)
             _oncelikli_depolar = set(['Merkez Depo', 'Online'])
@@ -373,7 +374,7 @@ class MagazaTransferSistemi:
                 km_oncelik_eq1 = km_oncelik[km_oncelik['Envanter'] == 1].copy()
                 if not km_oncelik_ge2.empty:
                     # SATIS dikkate alinmaz; en yuksek Envanterli oncelikli depodan al
-                    km_oncelik_ge2 = km_oncelik_ge2.sort_values(by=['Envanter','Depo Adi'], ascending=[False, True])
+                    km_oncelik_ge2 = km_oncelik_ge2.sort_values(by=['Envanter', 'Depo Adi'], ascending=[False, True])
                     en_iyi_kaynak = km_oncelik_ge2.iloc[0]
                     logger.info(f"Oncelikli depodan secildi (>=2, satis bakilmadi): {en_iyi_kaynak['Depo Adi']}")
                 elif not km_oncelik_eq1.empty:
@@ -410,10 +411,14 @@ class MagazaTransferSistemi:
                     else:
                         logger.info(f"'{eksik_urun_anahtari}' icin herkesin stogu 1 ve Satis > 0; transfer atlanacak")
                         continue
-logger.info(f"Transfer onerisi: {gonderen_magaza}({gonderen_envanter} adet) -> {target_store}")
+
+            gonderen_magaza = en_iyi_kaynak['Depo Adi']
+            gonderen_envanter = int(en_iyi_kaynak['Envanter'])
+            gonderen_satis = int(en_iyi_kaynak['Satis'])
+
+            logger.info(f"Transfer onerisi: {gonderen_magaza}({gonderen_envanter} adet) -> {target_store}")
             logger.info(f"   Urun: {urun_adi} | Renk: {renk} | Beden: {beden}")
-            
-            # 7. Transfer kaydi olustur
+# 7. Transfer kaydi olustur
             transferler.append({
                 'urun_adi': urun_adi,
                 'urun_kodu': urun_kodu,
