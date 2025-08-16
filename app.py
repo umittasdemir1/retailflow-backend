@@ -16,10 +16,10 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# CORS configuration - TÃ¼m origin'lere izin
+# CORS configuration - Tum origin'lere izin
 CORS(app, origins=["*"])
 
-# Configuration - BÃ¼yÃ¼k dosya desteÄŸi
+# Configuration - Buyuk dosya destegi
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
 ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 
@@ -32,7 +32,7 @@ STRATEGY_CONFIG = {
         'min_str_diff': 0.15,
         'min_inventory': 3,
         'max_transfer': 5,
-        'description': 'GÃ¼venli ve kontrollÃ¼ transfer yaklaÅŸÄ±mÄ±'
+        'description': 'Guvenli ve kontrollu transfer yaklasimi'
     },
     'kontrollu': {
         'min_str_diff': 0.10,
@@ -43,10 +43,11 @@ STRATEGY_CONFIG = {
     'agresif': {
         'min_str_diff': 0.08,
         'min_inventory': 1,
-        'max_transfer': None,  # sÄ±nÄ±rsÄ±z
-        'description': 'Maksimum performans odaklÄ±'
+        'max_transfer': None,  # sinirsiz
+        'description': 'Maksimum performans odakli'
     }
 }
+
 class MagazaTransferSistemi:
     def __init__(self):
         self.data = None
@@ -54,12 +55,12 @@ class MagazaTransferSistemi:
         self.mevcut_analiz = None
         self.current_strategy = 'sakin'
         self.excluded_stores = []
-        self.target_store = None  # Alan maÄŸaza seÃ§imi iÃ§in
+        self.target_store = None  # Alan magaza secimi icin
         self.transfer_type = 'global'  # 'global', 'targeted', 'size_completion'
         self.load_from_temp()
 
     def save_to_temp(self):
-        """Veriyi geÃ§ici dosyaya kaydet"""
+        """Veriyi gecici dosyaya kaydet"""
         try:
             with open(TEMP_DATA_FILE, 'wb') as f:
                 pickle.dump({
@@ -76,7 +77,7 @@ class MagazaTransferSistemi:
             logger.error(f"Failed to save temp data: {e}")
 
     def load_from_temp(self):
-        """GeÃ§ici dosyadan veriyi yÃ¼kle"""
+        """Gecici dosyadan veriyi yukle"""
         try:
             if os.path.exists(TEMP_DATA_FILE):
                 with open(TEMP_DATA_FILE, 'rb') as f:
@@ -93,7 +94,7 @@ class MagazaTransferSistemi:
             logger.error(f"Failed to load temp data: {e}")
 
     def clear_all_data(self):
-        """TÃ¼m veriyi temizle"""
+        """Tum veriyi temizle"""
         try:
             self.data = None
             self.magazalar = []
@@ -103,7 +104,7 @@ class MagazaTransferSistemi:
             self.target_store = None
             self.transfer_type = 'global'
             
-            # GeÃ§ici dosyayÄ± da sil
+            # Gecici dosyayi da sil
             if os.path.exists(TEMP_DATA_FILE):
                 os.remove(TEMP_DATA_FILE)
                 logger.info("Temp data file removed")
@@ -115,34 +116,34 @@ class MagazaTransferSistemi:
             return False
 
     def dosya_yukle_df(self, df):
-        """DataFrame'i yÃ¼kle ve iÅŸle"""
+        """DataFrame'i yukle ve isle"""
         try:
-            # SÃ¼tun isimlerini temizle
+            # Sutun isimlerini temizle
             df.columns = df.columns.str.strip()
             
-            logger.info(f"Bulunan sÃ¼tunlar: {list(df.columns)}")
+            logger.info(f"Bulunan sutunlar: {list(df.columns)}")
             
-            gerekli_sutunlar = ['Depo AdÄ±', 'ÃœrÃ¼n Kodu', 'ÃœrÃ¼n AdÄ±', 'Satis', 'Envanter']
+            gerekli_sutunlar = ['Depo Adi', 'Urun Kodu', 'Urun Adi', 'Satis', 'Envanter']
             eksik_sutunlar = [s for s in gerekli_sutunlar if s not in df.columns]
             
             if eksik_sutunlar:
-                return False, f"Eksik sÃ¼tunlar: {', '.join(eksik_sutunlar)}"
+                return False, f"Eksik sutunlar: {', '.join(eksik_sutunlar)}"
             
-            df = df.dropna(subset=['Depo AdÄ±'])
+            df = df.dropna(subset=['Depo Adi'])
             df['Satis'] = pd.to_numeric(df['Satis'], errors='coerce').fillna(0)
             df['Envanter'] = pd.to_numeric(df['Envanter'], errors='coerce').fillna(0)
             
-            # Negatif deÄŸerleri sÄ±fÄ±rla
+            # Negatif degerleri sifirla
             df['Satis'] = df['Satis'].clip(lower=0)
             df['Envanter'] = df['Envanter'].clip(lower=0)
             
             self.data = df
-            self.magazalar = df['Depo AdÄ±'].unique().tolist()
+            self.magazalar = df['Depo Adi'].unique().tolist()
             
-            logger.info(f"Veri yÃ¼klendi: {len(df)} satÄ±r, {len(self.magazalar)} maÄŸaza")
+            logger.info(f"Veri yuklendi: {len(df)} satir, {len(self.magazalar)} magaza")
             
             result = {
-                'message': f"BaÅŸarÄ±lÄ±! {len(df):,} Ã¼rÃ¼n, {len(self.magazalar)} maÄŸaza yÃ¼klendi.",
+                'message': f"Basarili! {len(df):,} urun, {len(self.magazalar)} magaza yuklendi.",
                 'satir_sayisi': len(df),
                 'magaza_sayisi': len(self.magazalar),
                 'magazalar': self.magazalar,
@@ -153,17 +154,17 @@ class MagazaTransferSistemi:
             return True, result
             
         except Exception as e:
-            logger.error(f"Dosya yÃ¼kleme hatasÄ±: {str(e)}")
+            logger.error(f"Dosya yukleme hatasi: {str(e)}")
             return False, f"Hata: {str(e)}"
 
     def magaza_metrikleri_hesapla(self):
-        """Her maÄŸaza iÃ§in metrikleri hesapla"""
+        """Her magaza icin metrikleri hesapla"""
         if self.data is None:
             return {}
 
         metrikler = {}
         for magaza in self.magazalar:
-            magaza_data = self.data[self.data['Depo AdÄ±'] == magaza]
+            magaza_data = self.data[self.data['Depo Adi'] == magaza]
             toplam_satis = magaza_data['Satis'].sum()
             toplam_envanter = magaza_data['Envanter'].sum()
 
@@ -177,7 +178,7 @@ class MagazaTransferSistemi:
         return metrikler
 
     def urun_anahtari_olustur(self, urun_adi, renk, beden):
-        """ÃœrÃ¼n adÄ± + renk + beden kombinasyonu ile benzersiz anahtar oluÅŸtur"""
+        """Urun adi + renk + beden kombinasyonu ile benzersiz anahtar olustur"""
         urun_adi = str(urun_adi).strip().upper() if pd.notna(urun_adi) else ""
         renk = str(renk).strip().upper() if pd.notna(renk) else ""
         beden = str(beden).strip().upper() if pd.notna(beden) else ""
@@ -191,7 +192,7 @@ class MagazaTransferSistemi:
         return satis / toplam
 
     def str_bazli_transfer_hesapla(self, gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy='sakin'):
-        """STR bazlÄ± transfer miktarÄ± hesapla - Strategy parametreli"""
+        """STR bazli transfer miktari hesapla - Strategy parametreli"""
         gonderen_str = self.str_hesapla(gonderen_satis, gonderen_envanter)
         alan_str = self.str_hesapla(alan_satis, alan_envanter)
         str_farki = alan_str - gonderen_str
@@ -200,27 +201,27 @@ class MagazaTransferSistemi:
         # Strategy config al
         config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
         
-        # Koruma filtreleri - strategy bazlÄ±
+        # Koruma filtreleri - strategy bazli
         max_transfer_40 = gonderen_envanter * 0.40
         
-        # Strategy'ye gÃ¶re minimum kalan
+        # Strategy'ye gore minimum kalan
         min_kalan = gonderen_envanter - config['min_inventory']
         
-        # Strategy'ye gÃ¶re maksimum transfer
+        # Strategy'ye gore maksimum transfer
         if config['max_transfer'] is None:
-            max_transfer_limit = float('inf')  # SÄ±nÄ±rsÄ±z
+            max_transfer_limit = float('inf')  # Sinirsiz
         else:
             max_transfer_limit = config['max_transfer']
         
         transfer_miktari = min(teorik_transfer, max_transfer_40, min_kalan, max_transfer_limit)
         transfer_miktari = max(1, min(transfer_miktari, gonderen_envanter))
         
-        # Hangi filtre uygulandÄ±ÄŸÄ±nÄ± belirle
+        # Hangi filtre uygulandigini belirle
         uygulanan_filtre = 'Teorik'
         if transfer_miktari == max_transfer_40:
             uygulanan_filtre = 'Max %40'
         elif transfer_miktari == min_kalan:
-            uygulanan_filtre = f'Min {config["min_inventory"]} kalsÄ±n'
+            uygulanan_filtre = f'Min {config["min_inventory"]} kalsin'
         elif transfer_miktari == max_transfer_limit and config['max_transfer'] is not None:
             uygulanan_filtre = f'Max {config["max_transfer"]} adet'
         
@@ -233,34 +234,34 @@ class MagazaTransferSistemi:
             'kullanilan_strateji': strategy
         }
 
-    def transfer_kosullarÄ±_kontrol(self, gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy='sakin'):
-        """STR bazlÄ± transfer koÅŸullarÄ± kontrol - Strategy parametreli"""
+    def transfer_kosullari_kontrol(self, gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy='sakin'):
+        """STR bazli transfer kosullari kontrol - Strategy parametreli"""
         config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
         
         if alan_satis <= gonderen_satis:
-            return False, f"Alan satÄ±ÅŸ ({alan_satis}) â‰¤ GÃ¶nderen satÄ±ÅŸ ({gonderen_satis})"
+            return False, f"Alan satis ({alan_satis}) <= Gonderen satis ({gonderen_satis})"
         
         if gonderen_envanter < config['min_inventory']:
-            return False, f"GÃ¶nderen envanter yetersiz ({gonderen_envanter} < {config['min_inventory']})"
+            return False, f"Gonderen envanter yetersiz ({gonderen_envanter} < {config['min_inventory']})"
         
         gonderen_str = self.str_hesapla(gonderen_satis, gonderen_envanter)
         alan_str = self.str_hesapla(alan_satis, alan_envanter)
         str_farki = alan_str - gonderen_str
         
         if str_farki < config['min_str_diff']:
-            return False, f"STR farkÄ± yetersiz ({str_farki*100:.1f}% < {config['min_str_diff']*100}%)"
+            return False, f"STR farki yetersiz ({str_farki*100:.1f}% < {config['min_str_diff']*100}%)"
         
         transfer_miktari, detaylar = self.str_bazli_transfer_hesapla(
             gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy
         )
         
         if transfer_miktari <= 0:
-            return False, "Transfer miktarÄ± hesaplanamadÄ±"
+            return False, "Transfer miktari hesaplanamadi"
         
         return True, f"STR: A{detaylar['alan_str']}%>G{detaylar['gonderen_str']}%, T:{transfer_miktari}"
 
     def beden_tamamlama_analizi_yap(self, target_store, excluded_stores=None):
-        """DÃœZELTME: Global transfer mantÄ±ÄŸÄ± ile Ã¼rÃ¼n anahtarÄ± bazlÄ± beden tamamlama"""
+        """DUZELTME: Global transfer mantigi ile urun anahtari bazli beden tamamlama"""
         if self.data is None:
             return None
 
@@ -270,42 +271,42 @@ class MagazaTransferSistemi:
             excluded_stores = []
         self.excluded_stores = excluded_stores
 
-        logger.info(f"ðŸŽ¯ ÃœRÃœN ANAHTARI bazlÄ± beden tamamlama analizi baÅŸlatÄ±lÄ±yor... Hedef: {target_store}")
+        logger.info(f"Hedef magaza beden tamamlama analizi baslatiliyor... Hedef: {target_store}")
         
         transferler = []
         
-        # Hedef maÄŸazanÄ±n Ã¼rÃ¼nlerini al
-        target_data = self.data[self.data['Depo AdÄ±'] == target_store]
+        # Hedef magazanin urunlerini al
+        target_data = self.data[self.data['Depo Adi'] == target_store]
         
         if target_data.empty:
-            logger.warning(f"Hedef maÄŸaza '{target_store}' iÃ§in veri bulunamadÄ±")
+            logger.warning(f"Hedef magaza '{target_store}' icin veri bulunamadi")
             return None
 
-        # 1. TÃœM VERÄ° iÃ§in Ã¼rÃ¼n anahtarlarÄ± oluÅŸtur (Global transfer mantÄ±ÄŸÄ±)
-        logger.info("ðŸ"‹ TÃ¼m veri iÃ§in Ã¼rÃ¼n anahtarlarÄ± oluÅŸturuluyor...")
+        # 1. TUM VERI icin urun anahtarlari olustur (Global transfer mantigi)
+        logger.info("Tum veri icin urun anahtarlari olusturuluyor...")
         self.data['urun_anahtari'] = self.data.apply(
             lambda x: self.urun_anahtari_olustur(
-                x['ÃœrÃ¼n AdÄ±'], 
-                x.get('Renk AÃ§Ä±klamasÄ±', ''), 
+                x['Urun Adi'], 
+                x.get('Renk Aciklamasi', ''), 
                 x.get('Beden', '')
             ), axis=1
         )
         
-        # 2. Hedef maÄŸaza iÃ§in de Ã¼rÃ¼n anahtarlarÄ± oluÅŸtur
+        # 2. Hedef magaza icin de urun anahtarlari olustur
         target_data['urun_anahtari'] = target_data.apply(
             lambda x: self.urun_anahtari_olustur(
-                x['ÃœrÃ¼n AdÄ±'], 
-                x.get('Renk AÃ§Ä±klamasÄ±', ''), 
+                x['Urun Adi'], 
+                x.get('Renk Aciklamasi', ''), 
                 x.get('Beden', '')
             ), axis=1
         )
 
-        # 3. Hedef maÄŸazada envanter=0 olan Ã¼rÃ¼n anahtarlarÄ±nÄ± bul
+        # 3. Hedef magazada envanter=0 olan urun anahtarlarini bul
         sifir_envanter = target_data[target_data['Envanter'] == 0]
-        logger.info(f"ðŸ"Š {target_store}'da envanter=0 olan {len(sifir_envanter)} Ã¼rÃ¼n kombinasyonu bulundu")
+        logger.info(f"{target_store}'da envanter=0 olan {len(sifir_envanter)} urun kombinasyonu bulundu")
         
         if sifir_envanter.empty:
-            logger.info(f"ðŸŽ‰ {target_store}'da hiÃ§ eksik Ã¼rÃ¼n yok!")
+            logger.info(f"{target_store}'da hic eksik urun yok!")
             result = {
                 'analiz_tipi': 'beden_tamamlama',
                 'strateji': 'urun_anahtari_bazli',
@@ -317,41 +318,41 @@ class MagazaTransferSistemi:
             self.save_to_temp()
             return result
         
-        # 4. Her eksik Ã¼rÃ¼n anahtarÄ± iÃ§in en iyi kaynak maÄŸazayÄ± bul
+        # 4. Her eksik urun anahtari icin en iyi kaynak magazayi bul
         for index, eksik_row in sifir_envanter.iterrows():
             eksik_urun_anahtari = eksik_row['urun_anahtari']
-            urun_adi = eksik_row['ÃœrÃ¼n AdÄ±']
-            renk = eksik_row.get('Renk AÃ§Ä±klamasÄ±', '')
+            urun_adi = eksik_row['Urun Adi']
+            renk = eksik_row.get('Renk Aciklamasi', '')
             beden = str(eksik_row.get('Beden', '')).strip()
-            urun_kodu = eksik_row.get('ÃœrÃ¼n Kodu', '')
+            urun_kodu = eksik_row.get('Urun Kodu', '')
             alan_satis = eksik_row['Satis']
             
-            logger.info(f"ðŸ" Eksik Ã¼rÃ¼n analizi: '{eksik_urun_anahtari}' (Alan satÄ±ÅŸ: {alan_satis})")
+            logger.info(f"Eksik urun analizi: '{eksik_urun_anahtari}' (Alan satis: {alan_satis})")
             
-            # 5. AynÄ± Ã¼rÃ¼n anahtarÄ±nÄ± diÄŸer maÄŸazalarda ara (Global transfer mantÄ±ÄŸÄ±)
+            # 5. Ayni urun anahtarini diger magazalarda ara (Global transfer mantigi)
             kaynak_magazalar = self.data[
-                (self.data['Depo AdÄ±'] != target_store) &
+                (self.data['Depo Adi'] != target_store) &
                 (self.data['urun_anahtari'] == eksik_urun_anahtari) &
                 (self.data['Envanter'] > 0) &
-                (~self.data['Depo AdÄ±'].isin(excluded_stores))
+                (~self.data['Depo Adi'].isin(excluded_stores))
             ]
             
-            logger.info(f"ðŸ"¦ '{eksik_urun_anahtari}' iÃ§in {len(kaynak_magazalar)} kaynak maÄŸaza bulundu")
+            logger.info(f"'{eksik_urun_anahtari}' icin {len(kaynak_magazalar)} kaynak magaza bulundu")
             
             if kaynak_magazalar.empty:
-                logger.warning(f"âŒ '{eksik_urun_anahtari}' iÃ§in kaynak maÄŸaza bulunamadÄ±")
+                logger.warning(f"'{eksik_urun_anahtari}' icin kaynak magaza bulunamadi")
                 continue
             
-            # 6. EN YÃœKSEK ENVANTERLI maÄŸazayÄ± seÃ§
+            # 6. EN YUKSEK ENVANTERLI magazayi sec
             en_iyi_kaynak = kaynak_magazalar.loc[kaynak_magazalar['Envanter'].idxmax()]
-            gonderen_magaza = en_iyi_kaynak['Depo AdÄ±']
+            gonderen_magaza = en_iyi_kaynak['Depo Adi']
             gonderen_envanter = en_iyi_kaynak['Envanter']
             gonderen_satis = en_iyi_kaynak['Satis']
             
-            logger.info(f"âœ… Transfer Ã¶nerisi: {gonderen_magaza}({gonderen_envanter} adet) â†' {target_store}")
-            logger.info(f"   ÃœrÃ¼n: {urun_adi} | Renk: {renk} | Beden: {beden}")
+            logger.info(f"Transfer onerisi: {gonderen_magaza}({gonderen_envanter} adet) -> {target_store}")
+            logger.info(f"   Urun: {urun_adi} | Renk: {renk} | Beden: {beden}")
             
-            # 7. Transfer kaydÄ± oluÅŸtur
+            # 7. Transfer kaydi olustur
             transferler.append({
                 'urun_adi': urun_adi,
                 'urun_kodu': urun_kodu,
@@ -370,9 +371,9 @@ class MagazaTransferSistemi:
                 'urun_anahtari': eksik_urun_anahtari
             })
 
-        logger.info(f"ðŸŽ‰ ÃœrÃ¼n anahtarÄ± bazlÄ± beden tamamlama tamamlandÄ±: {len(transferler)} transfer Ã¶nerisi")
+        logger.info(f"Urun anahtari bazli beden tamamlama tamamlandi: {len(transferler)} transfer onerisi")
         
-        # Transferleri Ã¼rÃ¼n anahtarÄ±na gÃ¶re sÄ±rala
+        # Transferleri urun anahtarina gore sirala
         transferler.sort(key=lambda x: x['urun_anahtari'])
         
         result = {
@@ -388,7 +389,7 @@ class MagazaTransferSistemi:
         return result
 
     def targeted_transfer_analizi_yap(self, target_store, strategy='sakin', excluded_stores=None):
-        """Spesifik maÄŸaza iÃ§in transfer analizi - Sadece bu maÄŸazayÄ± alan olarak analiz et"""
+        """Spesifik magaza icin transfer analizi - Sadece bu magazayi alan olarak analiz et"""
         if self.data is None:
             return None
 
@@ -399,45 +400,45 @@ class MagazaTransferSistemi:
             excluded_stores = []
         self.excluded_stores = excluded_stores
 
-        logger.info(f"Spesifik maÄŸaza analizi baÅŸlatÄ±lÄ±yor... Hedef: {target_store}, Strateji: {strategy}")
+        logger.info(f"Spesifik magaza analizi baslatiliyor... Hedef: {target_store}, Strateji: {strategy}")
         
         config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
         transferler = []
         
-        # Hedef maÄŸazanÄ±n verilerini al
-        target_data = self.data[self.data['Depo AdÄ±'] == target_store]
+        # Hedef magazanin verilerini al
+        target_data = self.data[self.data['Depo Adi'] == target_store]
         
         if target_data.empty:
-            logger.warning(f"Hedef maÄŸaza '{target_store}' iÃ§in veri bulunamadÄ±")
+            logger.warning(f"Hedef magaza '{target_store}' icin veri bulunamadi")
             return None
 
-        # DiÄŸer maÄŸazalardan bu maÄŸazaya transfer analizi
+        # Diger magazalardan bu magazaya transfer analizi
         diger_magazalar = [m for m in self.magazalar if m != target_store and m not in excluded_stores]
         
-        # Her Ã¼rÃ¼n iÃ§in analiz
+        # Her urun icin analiz
         tum_data = self.data.copy()
         tum_data['urun_anahtari'] = tum_data.apply(
             lambda x: self.urun_anahtari_olustur(
-                x['ÃœrÃ¼n AdÄ±'], 
-                x.get('Renk AÃ§Ä±klamasÄ±', ''), 
+                x['Urun Adi'], 
+                x.get('Renk Aciklamasi', ''), 
                 x.get('Beden', '')
             ), axis=1
         )
         
-        # Hedef maÄŸazadaki Ã¼rÃ¼nleri al
+        # Hedef magazadaki urunleri al
         target_urun_anahtarlari = target_data.apply(
             lambda x: self.urun_anahtari_olustur(
-                x['ÃœrÃ¼n AdÄ±'], 
-                x.get('Renk AÃ§Ä±klamasÄ±', ''), 
+                x['Urun Adi'], 
+                x.get('Renk Aciklamasi', ''), 
                 x.get('Beden', '')
             ), axis=1
         ).unique()
 
         for urun_anahtari in target_urun_anahtarlari:
-            # Hedef maÄŸazadaki bu Ã¼rÃ¼nÃ¼n verilerini al
+            # Hedef magazadaki bu urunun verilerini al
             target_urun_data = target_data[
                 target_data.apply(lambda x: self.urun_anahtari_olustur(
-                    x['ÃœrÃ¼n AdÄ±'], x.get('Renk AÃ§Ä±klamasÄ±', ''), x.get('Beden', '')
+                    x['Urun Adi'], x.get('Renk Aciklamasi', ''), x.get('Beden', '')
                 ), axis=1) == urun_anahtari
             ]
             
@@ -448,10 +449,10 @@ class MagazaTransferSistemi:
             alan_satis = target_row['Satis']
             alan_envanter = target_row['Envanter']
             
-            # DiÄŸer maÄŸazalarda aynÄ± Ã¼rÃ¼nÃ¼ ara
+            # Diger magazalarda ayni urunu ara
             for gonderen_magaza in diger_magazalar:
                 gonderen_urun_data = tum_data[
-                    (tum_data['Depo AdÄ±'] == gonderen_magaza) &
+                    (tum_data['Depo Adi'] == gonderen_magaza) &
                     (tum_data['urun_anahtari'] == urun_anahtari)
                 ]
                 
@@ -462,8 +463,8 @@ class MagazaTransferSistemi:
                 gonderen_satis = gonderen_row['Satis']
                 gonderen_envanter = gonderen_row['Envanter']
                 
-                # Transfer koÅŸullarÄ±nÄ± kontrol et
-                kosul_sonuc, kosul_mesaj = self.transfer_kosullarÄ±_kontrol(
+                # Transfer kosullarini kontrol et
+                kosul_sonuc, kosul_mesaj = self.transfer_kosullari_kontrol(
                     gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy
                 )
                 
@@ -475,9 +476,9 @@ class MagazaTransferSistemi:
                     if transfer_miktari > 0:
                         transferler.append({
                             'urun_anahtari': urun_anahtari,
-                            'urun_kodu': gonderen_row['ÃœrÃ¼n Kodu'],
-                            'urun_adi': gonderen_row['ÃœrÃ¼n AdÄ±'],
-                            'renk': gonderen_row.get('Renk AÃ§Ä±klamasÄ±', ''),
+                            'urun_kodu': gonderen_row['Urun Kodu'],
+                            'urun_adi': gonderen_row['Urun Adi'],
+                            'renk': gonderen_row.get('Renk Aciklamasi', ''),
                             'beden': gonderen_row.get('Beden', ''),
                             'gonderen_magaza': gonderen_magaza,
                             'alan_magaza': target_store,
@@ -493,10 +494,10 @@ class MagazaTransferSistemi:
                             'transfer_tipi': 'targeted'
                         })
 
-        # STR farkÄ±na gÃ¶re sÄ±rala
+        # STR farkina gore sirala
         transferler.sort(key=lambda x: x['str_farki'], reverse=True)
         
-        logger.info(f"Spesifik maÄŸaza analizi tamamlandÄ±: {len(transferler)} transfer Ã¶nerisi")
+        logger.info(f"Spesifik magaza analizi tamamlandi: {len(transferler)} transfer onerisi")
         
         result = {
             'analiz_tipi': 'targeted',
@@ -510,7 +511,7 @@ class MagazaTransferSistemi:
         return result
 
     def global_transfer_analizi_yap(self, strategy='sakin', excluded_stores=None):
-        """Global Ã¼rÃ¼n bazlÄ± transfer analizi - Strategy ve excluded_stores parametreli"""
+        """Global urun bazli transfer analizi - Strategy ve excluded_stores parametreli"""
         if self.data is None:
             return None
 
@@ -523,63 +524,63 @@ class MagazaTransferSistemi:
         
         config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
 
-        logger.info(f"Global ürün bazlı STR transfer analizi başlatılıyor... Strateji: {strategy}")
-        logger.info(f"İstisna mağazalar: {excluded_stores}")
+        logger.info(f"Global urun bazli STR transfer analizi baslatiliyor... Strateji: {strategy}")
+        logger.info(f"Istisna magazalar: {excluded_stores}")
         logger.info(f"Strateji parametreleri: {config}")
         
         metrikler = self.magaza_metrikleri_hesapla()
         transferler = []
         transfer_gereksiz = []
 
-        # TÜM mağazalarının ürünlerini grupla (ürün adı + renk + beden)
+        # TUM magazalarinin urunlerini grupla (urun adi + renk + beden)
         tum_data = self.data.copy()
         
-        # İstisna mağazaları filtrele
+        # Istisna magazalari filtrele
         if excluded_stores:
-            tum_data = tum_data[~tum_data['Depo Adı'].isin(excluded_stores)]
-            logger.info(f"İstisna mağazalar filtrelendi. Kalan veri: {len(tum_data)} satır")
+            tum_data = tum_data[~tum_data['Depo Adi'].isin(excluded_stores)]
+            logger.info(f"Istisna magazalar filtrelendi. Kalan veri: {len(tum_data)} satir")
         
         tum_data['urun_anahtari'] = tum_data.apply(
             lambda x: self.urun_anahtari_olustur(
-                x['Ürün Adı'], 
-                x.get('Renk Açıklaması', ''), 
+                x['Urun Adi'], 
+                x.get('Renk Aciklamasi', ''), 
                 x.get('Beden', '')
             ), axis=1
         )
         
-        # Tüm benzersiz ürün anahtarlarını al
+        # Tum benzersiz urun anahtarlarini al
         tum_urun_anahtarlari = tum_data['urun_anahtari'].unique()
         
-        logger.info(f"Toplam {len(tum_urun_anahtarlari)} benzersiz ürün grubu analiz ediliyor...")
+        logger.info(f"Toplam {len(tum_urun_anahtarlari)} benzersiz urun grubu analiz ediliyor...")
 
-        # Her ürün anahtarı için global optimizasyon
+        # Her urun anahtari icin global optimizasyon
         for index, urun_anahtari in enumerate(tum_urun_anahtarlari):
             if (index + 1) % 100 == 0:
-                logger.info(f"İşlenen: {index + 1}/{len(tum_urun_anahtarlari)}")
+                logger.info(f"Islenen: {index + 1}/{len(tum_urun_anahtarlari)}")
 
-            # Bu ürünün tüm mağazalardaki durumunu analiz et
+            # Bu urunun tum magazalardaki durumunu analiz et
             urun_data = tum_data[tum_data['urun_anahtari'] == urun_anahtari]
             
-            # Mağaza bazında grupla
-            magaza_gruplari = urun_data.groupby('Depo Adı').agg({
+            # Magaza bazinda grupla
+            magaza_gruplari = urun_data.groupby('Depo Adi').agg({
                 'Satis': 'sum',
                 'Envanter': 'sum',
-                'Ürün Adı': 'first',
-                'Renk Açıklaması': 'first',
+                'Urun Adi': 'first',
+                'Renk Aciklamasi': 'first',
                 'Beden': 'first',
-                'Ürün Kodu': 'first'
+                'Urun Kodu': 'first'
             }).reset_index()
 
-            # En az 2 mağazada olmalı transfer için
+            # En az 2 magazada olmali transfer icin
             if len(magaza_gruplari) < 2:
                 continue
 
-            # Her mağaza için STR hesapla
+            # Her magaza icin STR hesapla
             magaza_str_listesi = []
             for _, magaza_grup in magaza_gruplari.iterrows():
-                magaza = magaza_grup['Depo Adı']
+                magaza = magaza_grup['Depo Adi']
                 
-                # İstisna mağaza kontrolü (extra güvenlik)
+                # Istisna magaza kontrolu (extra guvenlik)
                 if magaza in excluded_stores:
                     continue
                     
@@ -592,24 +593,24 @@ class MagazaTransferSistemi:
                     'satis': satis,
                     'envanter': envanter,
                     'str': str_value,
-                    'urun_adi': magaza_grup['Ürün Adı'],
-                    'renk': magaza_grup.get('Renk Açıklaması', ''),
+                    'urun_adi': magaza_grup['Urun Adi'],
+                    'renk': magaza_grup.get('Renk Aciklamasi', ''),
                     'beden': magaza_grup.get('Beden', ''),
-                    'urun_kodu': magaza_grup['Ürün Kodu']
+                    'urun_kodu': magaza_grup['Urun Kodu']
                 })
 
-            # En az 2 mağaza kaldıysa devam et
+            # En az 2 magaza kaldiysa devam et
             if len(magaza_str_listesi) < 2:
                 continue
 
-            # STR'a göre sırala (düşükten yükseğe)
+            # STR'a gore sirala (dusukten yuksege)
             magaza_str_listesi.sort(key=lambda x: x['str'])
             
-            # En düşük ve en yüksek STR'ı al
+            # En dusuk ve en yuksek STR'i al
             en_dusuk_str = magaza_str_listesi[0]
             en_yuksek_str = magaza_str_listesi[-1]
 
-            # Transfer koşullarını kontrol et - Strategy parametreli
+            # Transfer kosullarini kontrol et - Strategy parametreli
             kosul_sonuc, kosul_mesaj = self.transfer_kosullari_kontrol(
                 en_dusuk_str['satis'], en_dusuk_str['envanter'], 
                 en_yuksek_str['satis'], en_yuksek_str['envanter'],
@@ -617,7 +618,7 @@ class MagazaTransferSistemi:
             )
             
             if kosul_sonuc:
-                # STR bazlı transfer miktarını hesapla - Strategy parametreli
+                # STR bazli transfer miktarini hesapla - Strategy parametreli
                 transfer_miktari, str_detaylar = self.str_bazli_transfer_hesapla(
                     en_dusuk_str['satis'], en_dusuk_str['envanter'],
                     en_yuksek_str['satis'], en_yuksek_str['envanter'],
@@ -625,16 +626,16 @@ class MagazaTransferSistemi:
                 )
                 
                 if transfer_miktari > 0:
-                    # Stok durumu STR bazında
+                    # Stok durumu STR bazinda
                     alan_str_val = str_detaylar['alan_str']
                     if alan_str_val >= 80:
-                        stok_durumu = 'YÜKSEK'
+                        stok_durumu = 'YUKSEK'
                     elif alan_str_val >= 50:
                         stok_durumu = 'NORMAL'
                     elif alan_str_val >= 20:
-                        stok_durumu = 'DÜŞÜK'
+                        stok_durumu = 'DUSUK'
                     else:
-                        stok_durumu = 'KRİTİK'
+                        stok_durumu = 'KRITIK'
                     
                     transferler.append({
                         'urun_anahtari': urun_anahtari,
@@ -663,7 +664,7 @@ class MagazaTransferSistemi:
                         'envanter_farki': int(en_dusuk_str['envanter'] - en_yuksek_str['envanter'])
                     })
             else:
-                # Transfer gerekmeyen ürünleri kaydet
+                # Transfer gerekmeyen urunleri kaydet
                 str_ortalama = sum(m['str'] for m in magaza_str_listesi) / len(magaza_str_listesi)
                 str_fark = max(m['str'] for m in magaza_str_listesi) - min(m['str'] for m in magaza_str_listesi)
                 
@@ -678,12 +679,12 @@ class MagazaTransferSistemi:
                     'red_nedeni': kosul_mesaj
                 })
 
-        # STR farkına göre sırala (yüksek fark = daha öncelikli)
+        # STR farkina gore sirala (yuksek fark = daha oncelikli)
         transferler.sort(key=lambda x: x['str_farki'], reverse=True)
 
-        logger.info(f"Global analiz tamamlandı ({strategy}): {len(transferler)} transfer, {len(transfer_gereksiz)} red")
+        logger.info(f"Global analiz tamamlandi ({strategy}): {len(transferler)} transfer, {len(transfer_gereksiz)} red")
         if excluded_stores:
-            logger.info(f"İstisna mağazalar: {excluded_stores}")
+            logger.info(f"Istisna magazalar: {excluded_stores}")
 
         result = {
             'analiz_tipi': 'global',
@@ -724,19 +725,19 @@ def health_check():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """Dosya yükleme endpoint'i"""
+    """Dosya yukleme endpoint'i"""
     try:
         logger.info("File upload request received")
         
         if 'file' not in request.files:
-            return jsonify({'error': 'Dosya seçilmedi'}), 400
+            return jsonify({'error': 'Dosya secilmedi'}), 400
         
         file = request.files['file']
         if file.filename == '':
-            return jsonify({'error': 'Dosya seçilmedi'}), 400
+            return jsonify({'error': 'Dosya secilmedi'}), 400
         
         if not allowed_file(file.filename):
-            return jsonify({'error': 'Geçersiz dosya formatı! Excel (.xlsx, .xls) veya CSV dosyası yükleyin.'}), 400
+            return jsonify({'error': 'Gecersiz dosya formati! Excel (.xlsx, .xls) veya CSV dosyasi yukleyin.'}), 400
         
         filename = secure_filename(file.filename)
         logger.info(f"Processing file: {filename}")
@@ -754,9 +755,9 @@ def upload_file():
             logger.info(f"File read successfully: {len(df)} rows")
         except Exception as e:
             logger.error(f"File reading error: {str(e)}")
-            return jsonify({'error': f'Dosya okuma hatası: {str(e)}'}), 400
+            return jsonify({'error': f'Dosya okuma hatasi: {str(e)}'}), 400
         
-        # Sisteme yükle
+        # Sisteme yukle
         success, result = sistem.dosya_yukle_df(df)
         
         if success:
@@ -772,35 +773,35 @@ def upload_file():
             
     except Exception as e:
         logger.error(f"Upload error: {str(e)}")
-        return jsonify({'error': f'Dosya yükleme hatası: {str(e)}'}), 500
+        return jsonify({'error': f'Dosya yukleme hatasi: {str(e)}'}), 500
 
 @app.route('/remove-file', methods=['POST'])
 def remove_file():
-    """Yüklenen dosyayı kaldırma endpoint'i"""
+    """Yuklenen dosyayi kaldirma endpoint'i"""
     try:
         logger.info("File removal request received")
         
         if sistem.data is None:
             logger.warning("No file to remove")
-            return jsonify({'error': 'Kaldırılacak dosya yok'}), 400
+            return jsonify({'error': 'Kaldirilacak dosya yok'}), 400
         
-        # Tüm veriyi temizle
+        # Tum veriyi temizle
         success = sistem.clear_all_data()
         
         if success:
             logger.info("File and all data removed successfully")
             return jsonify({
                 'success': True,
-                'message': 'Dosya ve tüm veriler başarıyla kaldırıldı',
+                'message': 'Dosya ve tum veriler basariyla kaldirildi',
                 'timestamp': datetime.now().isoformat()
             })
         else:
             logger.error("Failed to remove file and data")
-            return jsonify({'error': 'Dosya kaldırma işlemi başarısız'}), 500
+            return jsonify({'error': 'Dosya kaldirma islemi basarisiz'}), 500
             
     except Exception as e:
         logger.error(f"File removal error: {str(e)}")
-        return jsonify({'error': f'Dosya kaldırma hatası: {str(e)}'}), 500
+        return jsonify({'error': f'Dosya kaldirma hatasi: {str(e)}'}), 500
 
 @app.route('/analyze', methods=['POST'])
 def analyze_data():
@@ -810,7 +811,7 @@ def analyze_data():
         
         if sistem.data is None:
             logger.warning("No data available for analysis")
-            return jsonify({'error': 'Önce bir dosya yükleyin'}), 400
+            return jsonify({'error': 'Once bir dosya yukleyin'}), 400
         
         # Request parametrelerini al
         request_data = request.get_json() or {}
@@ -827,24 +828,24 @@ def analyze_data():
         if not isinstance(excluded_stores, list):
             excluded_stores = []
         
-        # Excluded stores'ları mevcut mağaza listesiyle filtrele
+        # Excluded stores'lari mevcut magaza listesiyle filtrele
         valid_excluded_stores = [store for store in excluded_stores if store in sistem.magazalar]
         
         logger.info(f"Starting {transfer_type} analysis... Strategy: {strategy}")
         logger.info(f"Target store: {target_store}")
         logger.info(f"Excluded stores: {valid_excluded_stores}")
         
-        # Transfer tipine göre analiz yap
+        # Transfer tipine gore analiz yap
         if transfer_type == 'size_completion':
             if not target_store or target_store not in sistem.magazalar:
-                return jsonify({'error': 'Beden tamamlama için geçerli bir hedef mağaza seçin'}), 400
+                return jsonify({'error': 'Beden tamamlama icin gecerli bir hedef magaza secin'}), 400
             
-            # Beden tamamlama için strateji kullanılmaz
+            # Beden tamamlama icin strateji kullanilmaz
             results = sistem.beden_tamamlama_analizi_yap(target_store, valid_excluded_stores)
         
         elif transfer_type == 'targeted':
             if not target_store or target_store not in sistem.magazalar:
-                return jsonify({'error': 'Spesifik mağaza analizi için geçerli bir hedef mağaza seçin'}), 400
+                return jsonify({'error': 'Spesifik magaza analizi icin gecerli bir hedef magaza secin'}), 400
             
             results = sistem.targeted_transfer_analizi_yap(target_store, strategy, valid_excluded_stores)
         
@@ -854,7 +855,7 @@ def analyze_data():
         if results:
             sistem.mevcut_analiz = results
             
-            # Sonuçları limitli şekilde gönder (JSON boyutunu küçült)
+            # Sonuclari limitli sekilde gonder (JSON boyutunu kucult)
             limited_results = {
                 'analiz_tipi': results['analiz_tipi'],
                 'strateji': results['strateji'],
@@ -865,7 +866,7 @@ def analyze_data():
                 'toplam_transfer_sayisi': len(results.get('transferler', []))
             }
             
-            # Global analiz için ek bilgiler
+            # Global analiz icin ek bilgiler
             if transfer_type == 'global':
                 limited_results['strateji_parametreleri'] = results.get('strateji_parametreleri')
                 limited_results['magaza_metrikleri'] = results.get('magaza_metrikleri')
@@ -882,21 +883,21 @@ def analyze_data():
             })
         else:
             logger.error("Analysis returned no results")
-            return jsonify({'error': 'Analiz başarısız'}), 500
+            return jsonify({'error': 'Analiz basarisiz'}), 500
             
     except Exception as e:
         logger.error(f"Analysis error: {str(e)}")
-        return jsonify({'error': f'Analiz hatası: {str(e)}'}), 500
+        return jsonify({'error': f'Analiz hatasi: {str(e)}'}), 500
 
 @app.route('/export/excel', methods=['POST'])
 def export_excel():
-    """Excel export - Transfer tipine göre özelleştirilmiş"""
+    """Excel export - Transfer tipine gore ozellestirilmis"""
     try:
         logger.info("Excel export request received")
         
         if not sistem.mevcut_analiz:
             logger.warning("No analysis results available for export")
-            return jsonify({'error': 'Analiz sonucu bulunamadı'}), 400
+            return jsonify({'error': 'Analiz sonucu bulunamadi'}), 400
         
         transferler = sistem.mevcut_analiz['transferler']
         analiz_tipi = sistem.mevcut_analiz.get('analiz_tipi', 'global')
@@ -905,67 +906,67 @@ def export_excel():
         
         logger.info(f"Exporting {len(transferler)} transfers to Excel (Type: {analiz_tipi}, Strategy: {strategy})")
         
-        # Excel dosyası oluştur
+        # Excel dosyasi olustur
         output = io.BytesIO()
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Ana transfer sayfası
+            # Ana transfer sayfasi
             if transferler:
                 df_transfer = pd.DataFrame(transferler)
                 
-                # Temel sütunlar
+                # Temel sutunlar
                 if analiz_tipi == 'size_completion':
                     selected_columns = {
-                        'urun_adi': 'Ürün Adı',
+                        'urun_adi': 'Urun Adi',
                         'renk': 'Renk',
                         'beden': 'Eksik Beden',
-                        'gonderen_magaza': 'Gönderen Mağaza',
-                        'alan_magaza': 'Hedef Mağaza',
-                        'transfer_miktari': 'Transfer Miktarı',
-                        'gonderen_envanter': 'Gönderen Envanter',
+                        'gonderen_magaza': 'Gonderen Magaza',
+                        'alan_magaza': 'Hedef Magaza',
+                        'transfer_miktari': 'Transfer Miktari',
+                        'gonderen_envanter': 'Gonderen Envanter',
                         'kullanilan_strateji': 'Strateji'
                     }
                     sheet_name = f'{target_store} Beden Tamamlama'
                 else:
                     selected_columns = {
-                        'urun_kodu': 'Ürün Kodu',
-                        'urun_adi': 'Ürün Adı',
+                        'urun_kodu': 'Urun Kodu',
+                        'urun_adi': 'Urun Adi',
                         'renk': 'Renk',
                         'beden': 'Beden',
-                        'gonderen_magaza': 'Gönderen Mağaza',
-                        'alan_magaza': 'Alan Mağaza',
-                        'transfer_miktari': 'Transfer Miktarı',
-                        'str_farki': 'STR Farkı (%)',
+                        'gonderen_magaza': 'Gonderen Magaza',
+                        'alan_magaza': 'Alan Magaza',
+                        'transfer_miktari': 'Transfer Miktari',
+                        'str_farki': 'STR Farki (%)',
                         'kullanilan_strateji': 'Strateji'
                     }
-                    sheet_name = f'{target_store} Transferleri' if analiz_tipi == 'targeted' else 'Transfer Önerileri'
+                    sheet_name = f'{target_store} Transferleri' if analiz_tipi == 'targeted' else 'Transfer Onerileri'
                 
-                # Mevcut sütunları filtrele
+                # Mevcut sutunlari filtrele
                 available_columns = {k: v for k, v in selected_columns.items() if k in df_transfer.columns}
                 df_export = df_transfer[list(available_columns.keys())].copy()
                 df_export = df_export.rename(columns=available_columns)
                 
                 df_export.to_excel(writer, index=False, sheet_name=sheet_name[:31])  # Excel sheet name limit
             
-            # Analiz özeti sayfası
+            # Analiz ozeti sayfasi
             summary_info = {
                 'Analiz Tipi': [analiz_tipi.upper()],
-                'Kullanılan Strateji': [strategy],
-                'Hedef Mağaza': [target_store or 'Tüm Mağazalar'],
+                'Kullanilan Strateji': [strategy],
+                'Hedef Magaza': [target_store or 'Tum Magazalar'],
                 'Toplam Transfer': [len(transferler)],
-                'İstisna Mağaza Sayısı': [len(sistem.excluded_stores)],
+                'Istisna Magaza Sayisi': [len(sistem.excluded_stores)],
                 'Analiz Tarihi': [datetime.now().strftime('%Y-%m-%d %H:%M')]
             }
             
             if sistem.excluded_stores:
-                summary_info['İstisna Mağazalar'] = [', '.join(sistem.excluded_stores)]
+                summary_info['Istisna Magazalar'] = [', '.join(sistem.excluded_stores)]
             
             df_summary = pd.DataFrame(summary_info)
-            df_summary.to_excel(writer, index=False, sheet_name='Analiz Özeti')
+            df_summary.to_excel(writer, index=False, sheet_name='Analiz Ozeti')
         
         output.seek(0)
         
-        # Dosya adı oluştur
+        # Dosya adi olustur
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         if analiz_tipi == 'size_completion':
             filename = f'beden_tamamlama_{target_store}_{strategy}_{timestamp}.xlsx'
@@ -974,7 +975,7 @@ def export_excel():
         else:
             filename = f'global_transfer_{strategy}_{timestamp}.xlsx'
         
-        # Dosya adını temizle (Windows uyumluluğu için)
+        # Dosya adini temizle (Windows uyumlulugu icin)
         filename = "".join(c for c in filename if c.isalnum() or c in (' ', '-', '_', '.')).rstrip()
         
         logger.info(f"Excel file created: {filename}")
@@ -988,14 +989,14 @@ def export_excel():
         
     except Exception as e:
         logger.error(f"Export error: {str(e)}")
-        return jsonify({'error': f'Export hatası: {str(e)}'}), 500
+        return jsonify({'error': f'Export hatasi: {str(e)}'}), 500
 
 @app.route('/stores', methods=['GET'])
 def get_stores():
-    """Mağaza listesi"""
+    """Magaza listesi"""
     try:
         if not sistem.magazalar:
-            return jsonify({'error': 'Mağaza verisi bulunamadı'}), 400
+            return jsonify({'error': 'Magaza verisi bulunamadi'}), 400
         
         metrikler = sistem.magaza_metrikleri_hesapla()
         stores = []
@@ -1017,7 +1018,7 @@ def get_stores():
         
     except Exception as e:
         logger.error(f"Stores error: {str(e)}")
-        return jsonify({'error': f'Mağaza verisi hatası: {str(e)}'}), 500
+        return jsonify({'error': f'Magaza verisi hatasi: {str(e)}'}), 500
 
 @app.route('/strategies', methods=['GET'])
 def get_strategies():
@@ -1045,20 +1046,20 @@ def get_strategies():
         
     except Exception as e:
         logger.error(f"Strategies error: {str(e)}")
-        return jsonify({'error': f'Strateji verisi hatası: {str(e)}'}), 500
+        return jsonify({'error': f'Strateji verisi hatasi: {str(e)}'}), 500
 
 # Error handlers
 @app.errorhandler(413)
 def too_large(e):
-    return jsonify({'error': 'Dosya boyutu çok büyük (max 100MB)'}), 413
+    return jsonify({'error': 'Dosya boyutu cok buyuk (max 100MB)'}), 413
 
 @app.errorhandler(500)
 def internal_error(error):
-    return jsonify({'error': 'Sunucu hatası'}), 500
+    return jsonify({'error': 'Sunucu hatasi'}), 500
 
 @app.errorhandler(404)
 def not_found(error):
-    return jsonify({'error': 'Endpoint bulunamadı'}), 404
+    return jsonify({'error': 'Endpoint bulunamadi'}), 404
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
