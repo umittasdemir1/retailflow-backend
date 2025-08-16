@@ -660,7 +660,7 @@ class MagazaTransferSistemi:
                         'magaza_sayisi': len(magaza_str_listesi),
                         'min_str': round(en_dusuk_str['str'] * 100, 1),
                         'max_str': round(en_yuksek_str['str'] * 100, 1),
-                        'salis_farki': int(en_yuksek_str['satis'] - en_dusuk_str['satis']),
+                        'satis_farki': int(en_yuksek_str['satis'] - en_dusuk_str['satis']),
                         'envanter_farki': int(en_dusuk_str['envanter'] - en_yuksek_str['envanter'])
                     })
             else:
@@ -1067,3 +1067,4 @@ if __name__ == '__main__':
     
     logger.info(f"Starting RetailFlow API v6.0 on port {port}")
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
+
