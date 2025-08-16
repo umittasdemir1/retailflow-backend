@@ -210,26 +210,17 @@ class MagazaTransferSistemi:
         alan_str = self.str_hesapla(alan_satis, alan_envanter)
         str_farki = alan_str - gonderen_str
         teorik_transfer = str_farki * gonderen_envanter
-        
         # Strategy config al
         config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
-        
         # Koruma filtreleri - strategy bazli
         max_transfer_40 = gonderen_envanter * 0.40
-        
-        # Strategy'ye gore minimum kalan
         min_kalan = gonderen_envanter - config['min_inventory']
-        
-        # Strategy'ye gore maksimum transfer
-        if config['max_transfer'] is None:
-            max_transfer_limit = float('inf')  # Sinirsiz
-        else:
-            max_transfer_limit = config['max_transfer']
-        
-        transfer_miktari = min(teorik_transfer, max_transfer_40, min_kalan, max_transfer_limit)
-        transfer_miktari = max(1, min(transfer_miktari, gonderen_envanter))
-        
+        max_transfer_limit = float('inf') if config['max_transfer'] is None else config['max_transfer']
+        # Limitleri gerçekten uygula; 0 da geçerli bir sonuç
+        kandidat = min(teorik_transfer, max_transfer_40, min_kalan, max_transfer_limit, gonderen_envanter)
+        transfer_miktari = int(kandidat) if kandidat > 0 else 0
         # Hangi filtre uygulandigini belirle
+# Hangi filtre uygulandigini belirle
         uygulanan_filtre = 'Teorik'
         if transfer_miktari == max_transfer_40:
             uygulanan_filtre = 'Max %40'
@@ -356,69 +347,16 @@ class MagazaTransferSistemi:
                 logger.warning(f"'{eksik_urun_anahtari}' icin kaynak magaza bulunamadi")
                 continue
             
-            
-            
-            # 6. GONDEREN SECIMI (Beden Tamamlama kurali)
-            # Oncelikli depolar: Merkez Depo ve Online (SATIS'A BAKILMAYACAK)
-            _oncelikli_depolar = set(['Merkez Depo', 'Online'])
-            kaynak_magazalar = kaynak_magazalar.copy()
-            # STR sadece oncelik disi depolarda kullanilacak
-            kaynak_magazalar['STR'] = kaynak_magazalar['Satis'] / kaynak_magazalar['Envanter']
-
-            en_iyi_kaynak = None
-
-            # 1) ONCELIKLI DEPOLARDA STOK VARSA HER ZAMAN BURADAN AL
-            km_oncelik = kaynak_magazalar[kaynak_magazalar['Depo Adi'].isin(_oncelikli_depolar)].copy()
-            if not km_oncelik.empty:
-                km_oncelik_ge2 = km_oncelik[km_oncelik['Envanter'] >= 2].copy()
-                km_oncelik_eq1 = km_oncelik[km_oncelik['Envanter'] == 1].copy()
-                if not km_oncelik_ge2.empty:
-                    # SATIS dikkate alinmaz; en yuksek Envanterli oncelikli depodan al
-                    km_oncelik_ge2 = km_oncelik_ge2.sort_values(by=['Envanter', 'Depo Adi'], ascending=[False, True])
-                    en_iyi_kaynak = km_oncelik_ge2.iloc[0]
-                    logger.info(f"Oncelikli depodan secildi (>=2, satis bakilmadi): {en_iyi_kaynak['Depo Adi']}")
-                elif not km_oncelik_eq1.empty:
-                    # SATIS dikkate alinmaz; 1 stogundan da al (0'a dusebilir)
-                    km_oncelik_eq1 = km_oncelik_eq1.sort_values(by=['Depo Adi'], ascending=[True])
-                    en_iyi_kaynak = km_oncelik_eq1.iloc[0]
-                    logger.info(f"Oncelikli depodan secildi (env=1, satis bakilmadi): {en_iyi_kaynak['Depo Adi']}")
-
-            # 2) Oncelikli depolarda uygun yoksa DIGER MAGAZALARA GEC
-            if en_iyi_kaynak is None:
-                # A) NORMAL DURUM: En az bir donorde Envanter >= 2
-                aday_norm = kaynak_magazalar[
-                    (kaynak_magazalar['Envanter'] >= 2) & (~kaynak_magazalar['Depo Adi'].isin(_oncelikli_depolar))
-                ].copy()
-                if not aday_norm.empty:
-                    # STR dusuk, benzerse Envanter yuksek
-                    aday_norm = aday_norm.sort_values(by=['STR', 'Envanter'], ascending=[True, False])
-                    en_iyi_kaynak = aday_norm.iloc[0]
-                    logger.info(f"Diger depodan secildi (>=2): {en_iyi_kaynak['Depo Adi']}")
-                else:
-                    # B) HERKES 1: Envanter == 1
-                    aday_ones = kaynak_magazalar[
-                        (kaynak_magazalar['Envanter'] == 1) & (~kaynak_magazalar['Depo Adi'].isin(_oncelikli_depolar))
-                    ].copy()
-                    if aday_ones.empty:
-                        logger.warning(f"'{eksik_urun_anahtari}' icin uygun gonderen yok (envanter yok)")
-                        continue
-                    # Satis = 0 olanlar oncelikli; yoksa satanin son parcasi korunur (transfer yok)
-                    sifir_satis = aday_ones[aday_ones['Satis'] == 0].copy()
-                    if not sifir_satis.empty:
-                        sifir_satis = sifir_satis.sort_values(by=['Depo Adi'], ascending=[True])
-                        en_iyi_kaynak = sifir_satis.iloc[0]
-                        logger.info(f"Diger depodan secildi (env=1, satis=0): {en_iyi_kaynak['Depo Adi']}")
-                    else:
-                        logger.info(f"'{eksik_urun_anahtari}' icin herkesin stogu 1 ve Satis > 0; transfer atlanacak")
-                        continue
-
+            # 6. EN YUKSEK ENVANTERLI magazayi sec
+            en_iyi_kaynak = kaynak_magazalar.loc[kaynak_magazalar['Envanter'].idxmax()]
             gonderen_magaza = en_iyi_kaynak['Depo Adi']
-            gonderen_envanter = int(en_iyi_kaynak['Envanter'])
-            gonderen_satis = int(en_iyi_kaynak['Satis'])
-
+            gonderen_envanter = en_iyi_kaynak['Envanter']
+            gonderen_satis = en_iyi_kaynak['Satis']
+            
             logger.info(f"Transfer onerisi: {gonderen_magaza}({gonderen_envanter} adet) -> {target_store}")
             logger.info(f"   Urun: {urun_adi} | Renk: {renk} | Beden: {beden}")
-# 7. Transfer kaydi olustur
+            
+            # 7. Transfer kaydi olustur
             transferler.append({
                 'urun_adi': urun_adi,
                 'urun_kodu': urun_kodu,
