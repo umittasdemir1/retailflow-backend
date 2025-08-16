@@ -358,28 +358,59 @@ class MagazaTransferSistemi:
             
             
             # 6. GONDEREN SECIMI (Beden Tamamlama kurali)
-            # Normal durum: En az bir donorde Envanter >= 2 varsa, STR dusuk olana oncelik ver; benzerse Envanter yuksek olana
+            # Oncelikli depolar: Merkez Depo ve Online (SATIS'A BAKILMAYACAK)
+            _oncelikli_depolar = set(['Merkez Depo', 'Online'])
             kaynak_magazalar = kaynak_magazalar.copy()
+            # STR sadece oncelik disi depolarda kullanilacak
             kaynak_magazalar['STR'] = kaynak_magazalar['Satis'] / kaynak_magazalar['Envanter']
-            aday_norm = kaynak_magazalar[kaynak_magazalar['Envanter'] >= 2].copy()
-            if not aday_norm.empty:
-                aday_norm = aday_norm.sort_values(by=['STR', 'Envanter'], ascending=[True, False])
-                en_iyi_kaynak = aday_norm.iloc[0]
-            else:
-                # Herkesin stogu 1 ise: once Satis = 0 olana oncelik ver, yoksa Satis en dusuk olana
-                aday_ones = kaynak_magazalar[kaynak_magazalar['Envanter'] == 1].copy()
-                if aday_ones.empty:
-                    logger.warning(f"'{eksik_urun_anahtari}' icin uygun gonderen yok (envanter yok)")
-                    continue
-                # Satis artan (0 oncelikli), sonra alfabetik olarak Depo Adi
-                aday_ones = aday_ones.sort_values(by=['Satis', 'Depo Adi'], ascending=[True, True])
-                en_iyi_kaynak = aday_ones.iloc[0]
 
-            gonderen_magaza = en_iyi_kaynak['Depo Adi']
-            gonderen_envanter = en_iyi_kaynak['Envanter']
-            gonderen_satis = en_iyi_kaynak['Satis']
-            
-            logger.info(f"Transfer onerisi: {gonderen_magaza}({gonderen_envanter} adet) -> {target_store}")
+            en_iyi_kaynak = None
+
+            # 1) ONCELIKLI DEPOLARDA STOK VARSA HER ZAMAN BURADAN AL
+            km_oncelik = kaynak_magazalar[kaynak_magazalar['Depo Adi'].isin(_oncelikli_depolar)].copy()
+            if not km_oncelik.empty:
+                km_oncelik_ge2 = km_oncelik[km_oncelik['Envanter'] >= 2].copy()
+                km_oncelik_eq1 = km_oncelik[km_oncelik['Envanter'] == 1].copy()
+                if not km_oncelik_ge2.empty:
+                    # SATIS dikkate alinmaz; en yuksek Envanterli oncelikli depodan al
+                    km_oncelik_ge2 = km_oncelik_ge2.sort_values(by=['Envanter','Depo Adi'], ascending=[False, True])
+                    en_iyi_kaynak = km_oncelik_ge2.iloc[0]
+                    logger.info(f"Oncelikli depodan secildi (>=2, satis bakilmadi): {en_iyi_kaynak['Depo Adi']}")
+                elif not km_oncelik_eq1.empty:
+                    # SATIS dikkate alinmaz; 1 stogundan da al (0'a dusebilir)
+                    km_oncelik_eq1 = km_oncelik_eq1.sort_values(by=['Depo Adi'], ascending=[True])
+                    en_iyi_kaynak = km_oncelik_eq1.iloc[0]
+                    logger.info(f"Oncelikli depodan secildi (env=1, satis bakilmadi): {en_iyi_kaynak['Depo Adi']}")
+
+            # 2) Oncelikli depolarda uygun yoksa DIGER MAGAZALARA GEC
+            if en_iyi_kaynak is None:
+                # A) NORMAL DURUM: En az bir donorde Envanter >= 2
+                aday_norm = kaynak_magazalar[
+                    (kaynak_magazalar['Envanter'] >= 2) & (~kaynak_magazalar['Depo Adi'].isin(_oncelikli_depolar))
+                ].copy()
+                if not aday_norm.empty:
+                    # STR dusuk, benzerse Envanter yuksek
+                    aday_norm = aday_norm.sort_values(by=['STR', 'Envanter'], ascending=[True, False])
+                    en_iyi_kaynak = aday_norm.iloc[0]
+                    logger.info(f"Diger depodan secildi (>=2): {en_iyi_kaynak['Depo Adi']}")
+                else:
+                    # B) HERKES 1: Envanter == 1
+                    aday_ones = kaynak_magazalar[
+                        (kaynak_magazalar['Envanter'] == 1) & (~kaynak_magazalar['Depo Adi'].isin(_oncelikli_depolar))
+                    ].copy()
+                    if aday_ones.empty:
+                        logger.warning(f"'{eksik_urun_anahtari}' icin uygun gonderen yok (envanter yok)")
+                        continue
+                    # Satis = 0 olanlar oncelikli; yoksa satanin son parcasi korunur (transfer yok)
+                    sifir_satis = aday_ones[aday_ones['Satis'] == 0].copy()
+                    if not sifir_satis.empty:
+                        sifir_satis = sifir_satis.sort_values(by=['Depo Adi'], ascending=[True])
+                        en_iyi_kaynak = sifir_satis.iloc[0]
+                        logger.info(f"Diger depodan secildi (env=1, satis=0): {en_iyi_kaynak['Depo Adi']}")
+                    else:
+                        logger.info(f"'{eksik_urun_anahtari}' icin herkesin stogu 1 ve Satis > 0; transfer atlanacak")
+                        continue
+logger.info(f"Transfer onerisi: {gonderen_magaza}({gonderen_envanter} adet) -> {target_store}")
             logger.info(f"   Urun: {urun_adi} | Renk: {renk} | Beden: {beden}")
             
             # 7. Transfer kaydi olustur
