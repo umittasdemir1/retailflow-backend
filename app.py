@@ -16,72 +16,15 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# CORS configuration - Tüm origin'lere izin
+# CORS configuration - TÃ¼m origin'lere izin
 CORS(app, origins=["*"])
 
-# Configuration - Büyük dosya desteği
+# Configuration - BÃ¼yÃ¼k dosya desteÄŸi
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
 ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 
 # Temp file path for session persistence
 TEMP_DATA_FILE = os.path.join(tempfile.gettempdir(), 'retailflow_data.pkl')
-
-# BEDEN HARİTASI - JSON dosyasından yükle
-def load_beden_haritasi():
-    """Beden haritasını JSON dosyasından yükle"""
-    try:
-        json_path = os.path.join(os.path.dirname(__file__), 'beden_haritasi.json')
-        with open(json_path, 'r', encoding='utf-8') as f:
-            beden_array = json.load(f)
-        
-        # Array formatını dictionary'ye çevir
-        beden_haritasi = {}
-        for item in beden_array:
-            if isinstance(item, dict) and 'ÜRÜN ADI' in item and 'BEDEN ARALIĞI' in item:
-                urun_adi = str(item['ÜRÜN ADI']).strip().upper()
-                beden_araligi = str(item['BEDEN ARALIĞI']).strip()
-                
-                # Skip header row
-                if urun_adi == 'ÜRÜN ADI' or beden_araligi == 'BEDEN ARALIĞI':
-                    continue
-                
-                # Bedenleri array'e çevir
-                if ',' in beden_araligi:
-                    bedenler = [b.strip() for b in beden_araligi.split(',')]
-                else:
-                    bedenler = [beden_araligi]
-                
-                # Kategori belirleme
-                if any(b in beden_araligi.upper() for b in ['XS', 'S', 'M', 'L']):
-                    if '-' in beden_araligi:
-                        kategori = 'kombine'
-                    else:
-                        kategori = 'tekstil'
-                elif any(b in beden_araligi for b in ['28', '30', '32', '34']):
-                    kategori = 'pantolon'
-                elif any(b in beden_araligi for b in ['36', '38', '40', '42']):
-                    kategori = 'ayakkabi'
-                elif 'STD' in beden_araligi.upper():
-                    kategori = 'standart'
-                elif any(b in beden_araligi for b in ['Y', '110', '120', '130']):
-                    kategori = 'cocuk'
-                else:
-                    kategori = 'diger'
-                
-                beden_haritasi[urun_adi] = {
-                    'sizes': bedenler,
-                    'category': kategori,
-                    'original_range': beden_araligi
-                }
-        
-        logger.info(f"Beden haritası yüklendi: {len(beden_haritasi)} ürün")
-        return beden_haritasi
-    except Exception as e:
-        logger.error(f"Beden haritası yüklenirken hata: {e}")
-        return {}
-
-# Global değişken olarak yükle
-BEDEN_HARITASI = load_beden_haritasi()
 
 # Strategy configurations
 STRATEGY_CONFIG = {
@@ -89,7 +32,7 @@ STRATEGY_CONFIG = {
         'min_str_diff': 0.15,
         'min_inventory': 3,
         'max_transfer': 5,
-        'description': 'Güvenli ve kontrollü transfer yaklaşımı'
+        'description': 'GÃ¼venli ve kontrollÃ¼ transfer yaklaÅŸÄ±mÄ±'
     },
     'kontrollu': {
         'min_str_diff': 0.10,
@@ -100,8 +43,8 @@ STRATEGY_CONFIG = {
     'agresif': {
         'min_str_diff': 0.08,
         'min_inventory': 1,
-        'max_transfer': None,  # sınırsız
-        'description': 'Maksimum performans odaklı'
+        'max_transfer': None,  # sÄ±nÄ±rsÄ±z
+        'description': 'Maksimum performans odaklÄ±'
     }
 }
 class MagazaTransferSistemi:
@@ -111,12 +54,12 @@ class MagazaTransferSistemi:
         self.mevcut_analiz = None
         self.current_strategy = 'sakin'
         self.excluded_stores = []
-        self.target_store = None  # Alan mağaza seçimi için
+        self.target_store = None  # Alan maÄŸaza seÃ§imi iÃ§in
         self.transfer_type = 'global'  # 'global', 'targeted', 'size_completion'
         self.load_from_temp()
 
     def save_to_temp(self):
-        """Veriyi geçici dosyaya kaydet"""
+        """Veriyi geÃ§ici dosyaya kaydet"""
         try:
             with open(TEMP_DATA_FILE, 'wb') as f:
                 pickle.dump({
@@ -133,7 +76,7 @@ class MagazaTransferSistemi:
             logger.error(f"Failed to save temp data: {e}")
 
     def load_from_temp(self):
-        """Geçici dosyadan veriyi yükle"""
+        """GeÃ§ici dosyadan veriyi yÃ¼kle"""
         try:
             if os.path.exists(TEMP_DATA_FILE):
                 with open(TEMP_DATA_FILE, 'rb') as f:
@@ -150,7 +93,7 @@ class MagazaTransferSistemi:
             logger.error(f"Failed to load temp data: {e}")
 
     def clear_all_data(self):
-        """Tüm veriyi temizle"""
+        """TÃ¼m veriyi temizle"""
         try:
             self.data = None
             self.magazalar = []
@@ -160,7 +103,7 @@ class MagazaTransferSistemi:
             self.target_store = None
             self.transfer_type = 'global'
             
-            # Geçici dosyayı da sil
+            # GeÃ§ici dosyayÄ± da sil
             if os.path.exists(TEMP_DATA_FILE):
                 os.remove(TEMP_DATA_FILE)
                 logger.info("Temp data file removed")
@@ -172,34 +115,34 @@ class MagazaTransferSistemi:
             return False
 
     def dosya_yukle_df(self, df):
-        """DataFrame'i yükle ve işle"""
+        """DataFrame'i yÃ¼kle ve iÅŸle"""
         try:
-            # Sütun isimlerini temizle
+            # SÃ¼tun isimlerini temizle
             df.columns = df.columns.str.strip()
             
-            logger.info(f"Bulunan sütunlar: {list(df.columns)}")
+            logger.info(f"Bulunan sÃ¼tunlar: {list(df.columns)}")
             
-            gerekli_sutunlar = ['Depo Adı', 'Ürün Kodu', 'Ürün Adı', 'Satis', 'Envanter']
+            gerekli_sutunlar = ['Depo AdÄ±', 'ÃœrÃ¼n Kodu', 'ÃœrÃ¼n AdÄ±', 'Satis', 'Envanter']
             eksik_sutunlar = [s for s in gerekli_sutunlar if s not in df.columns]
             
             if eksik_sutunlar:
-                return False, f"Eksik sütunlar: {', '.join(eksik_sutunlar)}"
+                return False, f"Eksik sÃ¼tunlar: {', '.join(eksik_sutunlar)}"
             
-            df = df.dropna(subset=['Depo Adı'])
+            df = df.dropna(subset=['Depo AdÄ±'])
             df['Satis'] = pd.to_numeric(df['Satis'], errors='coerce').fillna(0)
             df['Envanter'] = pd.to_numeric(df['Envanter'], errors='coerce').fillna(0)
             
-            # Negatif değerleri sıfırla
+            # Negatif deÄŸerleri sÄ±fÄ±rla
             df['Satis'] = df['Satis'].clip(lower=0)
             df['Envanter'] = df['Envanter'].clip(lower=0)
             
             self.data = df
-            self.magazalar = df['Depo Adı'].unique().tolist()
+            self.magazalar = df['Depo AdÄ±'].unique().tolist()
             
-            logger.info(f"Veri yüklendi: {len(df)} satır, {len(self.magazalar)} mağaza")
+            logger.info(f"Veri yÃ¼klendi: {len(df)} satÄ±r, {len(self.magazalar)} maÄŸaza")
             
             result = {
-                'message': f"Başarılı! {len(df):,} ürün, {len(self.magazalar)} mağaza yüklendi.",
+                'message': f"BaÅŸarÄ±lÄ±! {len(df):,} Ã¼rÃ¼n, {len(self.magazalar)} maÄŸaza yÃ¼klendi.",
                 'satir_sayisi': len(df),
                 'magaza_sayisi': len(self.magazalar),
                 'magazalar': self.magazalar,
@@ -210,17 +153,17 @@ class MagazaTransferSistemi:
             return True, result
             
         except Exception as e:
-            logger.error(f"Dosya yükleme hatası: {str(e)}")
+            logger.error(f"Dosya yÃ¼kleme hatasÄ±: {str(e)}")
             return False, f"Hata: {str(e)}"
 
     def magaza_metrikleri_hesapla(self):
-        """Her mağaza için metrikleri hesapla"""
+        """Her maÄŸaza iÃ§in metrikleri hesapla"""
         if self.data is None:
             return {}
 
         metrikler = {}
         for magaza in self.magazalar:
-            magaza_data = self.data[self.data['Depo Adı'] == magaza]
+            magaza_data = self.data[self.data['Depo AdÄ±'] == magaza]
             toplam_satis = magaza_data['Satis'].sum()
             toplam_envanter = magaza_data['Envanter'].sum()
 
@@ -234,7 +177,7 @@ class MagazaTransferSistemi:
         return metrikler
 
     def urun_anahtari_olustur(self, urun_adi, renk, beden):
-        """Ürün adı + renk + beden kombinasyonu ile benzersiz anahtar oluştur"""
+        """ÃœrÃ¼n adÄ± + renk + beden kombinasyonu ile benzersiz anahtar oluÅŸtur"""
         urun_adi = str(urun_adi).strip().upper() if pd.notna(urun_adi) else ""
         renk = str(renk).strip().upper() if pd.notna(renk) else ""
         beden = str(beden).strip().upper() if pd.notna(beden) else ""
@@ -248,7 +191,7 @@ class MagazaTransferSistemi:
         return satis / toplam
 
     def str_bazli_transfer_hesapla(self, gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy='sakin'):
-        """STR bazlı transfer miktarı hesapla - Strategy parametreli"""
+        """STR bazlÄ± transfer miktarÄ± hesapla - Strategy parametreli"""
         gonderen_str = self.str_hesapla(gonderen_satis, gonderen_envanter)
         alan_str = self.str_hesapla(alan_satis, alan_envanter)
         str_farki = alan_str - gonderen_str
@@ -257,27 +200,27 @@ class MagazaTransferSistemi:
         # Strategy config al
         config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
         
-        # Koruma filtreleri - strategy bazlı
+        # Koruma filtreleri - strategy bazlÄ±
         max_transfer_40 = gonderen_envanter * 0.40
         
-        # Strategy'ye göre minimum kalan
+        # Strategy'ye gÃ¶re minimum kalan
         min_kalan = gonderen_envanter - config['min_inventory']
         
-        # Strategy'ye göre maksimum transfer
+        # Strategy'ye gÃ¶re maksimum transfer
         if config['max_transfer'] is None:
-            max_transfer_limit = float('inf')  # Sınırsız
+            max_transfer_limit = float('inf')  # SÄ±nÄ±rsÄ±z
         else:
             max_transfer_limit = config['max_transfer']
         
         transfer_miktari = min(teorik_transfer, max_transfer_40, min_kalan, max_transfer_limit)
         transfer_miktari = max(1, min(transfer_miktari, gonderen_envanter))
         
-        # Hangi filtre uygulandığını belirle
+        # Hangi filtre uygulandÄ±ÄŸÄ±nÄ± belirle
         uygulanan_filtre = 'Teorik'
         if transfer_miktari == max_transfer_40:
             uygulanan_filtre = 'Max %40'
         elif transfer_miktari == min_kalan:
-            uygulanan_filtre = f'Min {config["min_inventory"]} kalsın'
+            uygulanan_filtre = f'Min {config["min_inventory"]} kalsÄ±n'
         elif transfer_miktari == max_transfer_limit and config['max_transfer'] is not None:
             uygulanan_filtre = f'Max {config["max_transfer"]} adet'
         
@@ -290,62 +233,34 @@ class MagazaTransferSistemi:
             'kullanilan_strateji': strategy
         }
 
-    def transfer_kosulları_kontrol(self, gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy='sakin'):
-        """STR bazlı transfer koşulları kontrol - Strategy parametreli"""
+    def transfer_kosullarÄ±_kontrol(self, gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy='sakin'):
+        """STR bazlÄ± transfer koÅŸullarÄ± kontrol - Strategy parametreli"""
         config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
         
         if alan_satis <= gonderen_satis:
-            return False, f"Alan satış ({alan_satis}) ≤ Gönderen satış ({gonderen_satis})"
+            return False, f"Alan satÄ±ÅŸ ({alan_satis}) â‰¤ GÃ¶nderen satÄ±ÅŸ ({gonderen_satis})"
         
         if gonderen_envanter < config['min_inventory']:
-            return False, f"Gönderen envanter yetersiz ({gonderen_envanter} < {config['min_inventory']})"
+            return False, f"GÃ¶nderen envanter yetersiz ({gonderen_envanter} < {config['min_inventory']})"
         
         gonderen_str = self.str_hesapla(gonderen_satis, gonderen_envanter)
         alan_str = self.str_hesapla(alan_satis, alan_envanter)
         str_farki = alan_str - gonderen_str
         
         if str_farki < config['min_str_diff']:
-            return False, f"STR farkı yetersiz ({str_farki*100:.1f}% < {config['min_str_diff']*100}%)"
+            return False, f"STR farkÄ± yetersiz ({str_farki*100:.1f}% < {config['min_str_diff']*100}%)"
         
         transfer_miktari, detaylar = self.str_bazli_transfer_hesapla(
             gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy
         )
         
         if transfer_miktari <= 0:
-            return False, "Transfer miktarı hesaplanamadı"
+            return False, "Transfer miktarÄ± hesaplanamadÄ±"
         
         return True, f"STR: A{detaylar['alan_str']}%>G{detaylar['gonderen_str']}%, T:{transfer_miktari}"
 
-    def get_urun_beden_araligi(self, urun_adi):
-        """Ürün için beden aralığını beden haritasından al - AKILLI EŞLEŞTIRME"""
-        urun_adi_upper = urun_adi.strip().upper()
-        
-        # 1. Tam eşleşme dene
-        if urun_adi_upper in BEDEN_HARITASI:
-            logger.info(f"Tam eşleşme bulundu: {urun_adi_upper}")
-            return BEDEN_HARITASI[urun_adi_upper]['sizes']
-        
-        # 2. Kısmi eşleşme dene (JSON'daki ürün adı, veri içinde geçiyor mu?)
-        for json_urun_adi, beden_info in BEDEN_HARITASI.items():
-            # JSON'daki ürün adı, gerçek ürün adının başında mı?
-            if json_urun_adi in urun_adi_upper and json_urun_adi != 'ÜRÜN ADI':
-                logger.info(f"Kısmi eşleşme bulundu: '{json_urun_adi}' -> '{urun_adi_upper}'")
-                return beden_info['sizes']
-        
-        # 3. Kelime bazlı eşleşme (ilk 2 kelime)
-        urun_kelimeleri = urun_adi_upper.split()
-        if len(urun_kelimeleri) >= 2:
-            ilk_iki_kelime = ' '.join(urun_kelimeleri[:2])
-            for json_urun_adi, beden_info in BEDEN_HARITASI.items():
-                if json_urun_adi == ilk_iki_kelime:
-                    logger.info(f"Kelime bazlı eşleşme: '{json_urun_adi}' -> '{urun_adi_upper}'")
-                    return beden_info['sizes']
-        
-        logger.warning(f"Beden haritasında eşleşme bulunamadı: {urun_adi_upper}")
-        return None
-
     def beden_tamamlama_analizi_yap(self, target_store, excluded_stores=None):
-        """DÜZELTME: Global transfer mantığı ile ürün anahtarı bazlı beden tamamlama"""
+        """DÃœZELTME: Global transfer mantÄ±ÄŸÄ± ile Ã¼rÃ¼n anahtarÄ± bazlÄ± beden tamamlama"""
         if self.data is None:
             return None
 
@@ -355,42 +270,42 @@ class MagazaTransferSistemi:
             excluded_stores = []
         self.excluded_stores = excluded_stores
 
-        logger.info(f"🎯 ÜRÜN ANAHTARI bazlı beden tamamlama analizi başlatılıyor... Hedef: {target_store}")
+        logger.info(f"ðŸŽ¯ ÃœRÃœN ANAHTARI bazlÄ± beden tamamlama analizi baÅŸlatÄ±lÄ±yor... Hedef: {target_store}")
         
         transferler = []
         
-        # Hedef mağazanın ürünlerini al
-        target_data = self.data[self.data['Depo Adı'] == target_store]
+        # Hedef maÄŸazanÄ±n Ã¼rÃ¼nlerini al
+        target_data = self.data[self.data['Depo AdÄ±'] == target_store]
         
         if target_data.empty:
-            logger.warning(f"Hedef mağaza '{target_store}' için veri bulunamadı")
+            logger.warning(f"Hedef maÄŸaza '{target_store}' iÃ§in veri bulunamadÄ±")
             return None
 
-        # 1. TÜM VERİ için ürün anahtarları oluştur (Global transfer mantığı)
-        logger.info("📋 Tüm veri için ürün anahtarları oluşturuluyor...")
+        # 1. TÃœM VERÄ° iÃ§in Ã¼rÃ¼n anahtarlarÄ± oluÅŸtur (Global transfer mantÄ±ÄŸÄ±)
+        logger.info("ðŸ"‹ TÃ¼m veri iÃ§in Ã¼rÃ¼n anahtarlarÄ± oluÅŸturuluyor...")
         self.data['urun_anahtari'] = self.data.apply(
             lambda x: self.urun_anahtari_olustur(
-                x['Ürün Adı'], 
-                x.get('Renk Açıklaması', ''), 
+                x['ÃœrÃ¼n AdÄ±'], 
+                x.get('Renk AÃ§Ä±klamasÄ±', ''), 
                 x.get('Beden', '')
             ), axis=1
         )
         
-        # 2. Hedef mağaza için de ürün anahtarları oluştur
+        # 2. Hedef maÄŸaza iÃ§in de Ã¼rÃ¼n anahtarlarÄ± oluÅŸtur
         target_data['urun_anahtari'] = target_data.apply(
             lambda x: self.urun_anahtari_olustur(
-                x['Ürün Adı'], 
-                x.get('Renk Açıklaması', ''), 
+                x['ÃœrÃ¼n AdÄ±'], 
+                x.get('Renk AÃ§Ä±klamasÄ±', ''), 
                 x.get('Beden', '')
             ), axis=1
         )
 
-        # 3. Hedef mağazada envanter=0 olan ürün anahtarlarını bul
+        # 3. Hedef maÄŸazada envanter=0 olan Ã¼rÃ¼n anahtarlarÄ±nÄ± bul
         sifir_envanter = target_data[target_data['Envanter'] == 0]
-        logger.info(f"📊 {target_store}'da envanter=0 olan {len(sifir_envanter)} ürün kombinasyonu bulundu")
+        logger.info(f"ðŸ"Š {target_store}'da envanter=0 olan {len(sifir_envanter)} Ã¼rÃ¼n kombinasyonu bulundu")
         
         if sifir_envanter.empty:
-            logger.info(f"🎉 {target_store}'da hiç eksik ürün yok!")
+            logger.info(f"ðŸŽ‰ {target_store}'da hiÃ§ eksik Ã¼rÃ¼n yok!")
             result = {
                 'analiz_tipi': 'beden_tamamlama',
                 'strateji': 'urun_anahtari_bazli',
@@ -402,41 +317,41 @@ class MagazaTransferSistemi:
             self.save_to_temp()
             return result
         
-        # 4. Her eksik ürün anahtarı için en iyi kaynak mağazayı bul
+        # 4. Her eksik Ã¼rÃ¼n anahtarÄ± iÃ§in en iyi kaynak maÄŸazayÄ± bul
         for index, eksik_row in sifir_envanter.iterrows():
             eksik_urun_anahtari = eksik_row['urun_anahtari']
-            urun_adi = eksik_row['Ürün Adı']
-            renk = eksik_row.get('Renk Açıklaması', '')
+            urun_adi = eksik_row['ÃœrÃ¼n AdÄ±']
+            renk = eksik_row.get('Renk AÃ§Ä±klamasÄ±', '')
             beden = str(eksik_row.get('Beden', '')).strip()
-            urun_kodu = eksik_row.get('Ürün Kodu', '')
+            urun_kodu = eksik_row.get('ÃœrÃ¼n Kodu', '')
             alan_satis = eksik_row['Satis']
             
-            logger.info(f"🔍 Eksik ürün analizi: '{eksik_urun_anahtari}' (Alan satış: {alan_satis})")
+            logger.info(f"ðŸ" Eksik Ã¼rÃ¼n analizi: '{eksik_urun_anahtari}' (Alan satÄ±ÅŸ: {alan_satis})")
             
-            # 5. Aynı ürün anahtarını diğer mağazalarda ara (Global transfer mantığı)
+            # 5. AynÄ± Ã¼rÃ¼n anahtarÄ±nÄ± diÄŸer maÄŸazalarda ara (Global transfer mantÄ±ÄŸÄ±)
             kaynak_magazalar = self.data[
-                (self.data['Depo Adı'] != target_store) &
+                (self.data['Depo AdÄ±'] != target_store) &
                 (self.data['urun_anahtari'] == eksik_urun_anahtari) &
                 (self.data['Envanter'] > 0) &
-                (~self.data['Depo Adı'].isin(excluded_stores))
+                (~self.data['Depo AdÄ±'].isin(excluded_stores))
             ]
             
-            logger.info(f"📦 '{eksik_urun_anahtari}' için {len(kaynak_magazalar)} kaynak mağaza bulundu")
+            logger.info(f"ðŸ"¦ '{eksik_urun_anahtari}' iÃ§in {len(kaynak_magazalar)} kaynak maÄŸaza bulundu")
             
             if kaynak_magazalar.empty:
-                logger.warning(f"❌ '{eksik_urun_anahtari}' için kaynak mağaza bulunamadı")
+                logger.warning(f"âŒ '{eksik_urun_anahtari}' iÃ§in kaynak maÄŸaza bulunamadÄ±")
                 continue
             
-            # 6. EN YÜKSEK ENVANTERLI mağazayı seç
+            # 6. EN YÃœKSEK ENVANTERLI maÄŸazayÄ± seÃ§
             en_iyi_kaynak = kaynak_magazalar.loc[kaynak_magazalar['Envanter'].idxmax()]
-            gonderen_magaza = en_iyi_kaynak['Depo Adı']
+            gonderen_magaza = en_iyi_kaynak['Depo AdÄ±']
             gonderen_envanter = en_iyi_kaynak['Envanter']
             gonderen_satis = en_iyi_kaynak['Satis']
             
-            logger.info(f"✅ Transfer önerisi: {gonderen_magaza}({gonderen_envanter} adet) → {target_store}")
-            logger.info(f"   Ürün: {urun_adi} | Renk: {renk} | Beden: {beden}")
+            logger.info(f"âœ… Transfer Ã¶nerisi: {gonderen_magaza}({gonderen_envanter} adet) â†' {target_store}")
+            logger.info(f"   ÃœrÃ¼n: {urun_adi} | Renk: {renk} | Beden: {beden}")
             
-            # 7. Transfer kaydı oluştur
+            # 7. Transfer kaydÄ± oluÅŸtur
             transferler.append({
                 'urun_adi': urun_adi,
                 'urun_kodu': urun_kodu,
@@ -455,9 +370,9 @@ class MagazaTransferSistemi:
                 'urun_anahtari': eksik_urun_anahtari
             })
 
-        logger.info(f"🎉 Ürün anahtarı bazlı beden tamamlama tamamlandı: {len(transferler)} transfer önerisi")
+        logger.info(f"ðŸŽ‰ ÃœrÃ¼n anahtarÄ± bazlÄ± beden tamamlama tamamlandÄ±: {len(transferler)} transfer Ã¶nerisi")
         
-        # Transferleri ürün anahtarına göre sırala
+        # Transferleri Ã¼rÃ¼n anahtarÄ±na gÃ¶re sÄ±rala
         transferler.sort(key=lambda x: x['urun_anahtari'])
         
         result = {
@@ -473,7 +388,7 @@ class MagazaTransferSistemi:
         return result
 
     def targeted_transfer_analizi_yap(self, target_store, strategy='sakin', excluded_stores=None):
-        """Spesifik mağaza için transfer analizi - Sadece bu mağazayı alan olarak analiz et"""
+        """Spesifik maÄŸaza iÃ§in transfer analizi - Sadece bu maÄŸazayÄ± alan olarak analiz et"""
         if self.data is None:
             return None
 
@@ -484,45 +399,45 @@ class MagazaTransferSistemi:
             excluded_stores = []
         self.excluded_stores = excluded_stores
 
-        logger.info(f"Spesifik mağaza analizi başlatılıyor... Hedef: {target_store}, Strateji: {strategy}")
+        logger.info(f"Spesifik maÄŸaza analizi baÅŸlatÄ±lÄ±yor... Hedef: {target_store}, Strateji: {strategy}")
         
         config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
         transferler = []
         
-        # Hedef mağazanın verilerini al
-        target_data = self.data[self.data['Depo Adı'] == target_store]
+        # Hedef maÄŸazanÄ±n verilerini al
+        target_data = self.data[self.data['Depo AdÄ±'] == target_store]
         
         if target_data.empty:
-            logger.warning(f"Hedef mağaza '{target_store}' için veri bulunamadı")
+            logger.warning(f"Hedef maÄŸaza '{target_store}' iÃ§in veri bulunamadÄ±")
             return None
 
-        # Diğer mağazalardan bu mağazaya transfer analizi
+        # DiÄŸer maÄŸazalardan bu maÄŸazaya transfer analizi
         diger_magazalar = [m for m in self.magazalar if m != target_store and m not in excluded_stores]
         
-        # Her ürün için analiz
+        # Her Ã¼rÃ¼n iÃ§in analiz
         tum_data = self.data.copy()
         tum_data['urun_anahtari'] = tum_data.apply(
             lambda x: self.urun_anahtari_olustur(
-                x['Ürün Adı'], 
-                x.get('Renk Açıklaması', ''), 
+                x['ÃœrÃ¼n AdÄ±'], 
+                x.get('Renk AÃ§Ä±klamasÄ±', ''), 
                 x.get('Beden', '')
             ), axis=1
         )
         
-        # Hedef mağazadaki ürünleri al
+        # Hedef maÄŸazadaki Ã¼rÃ¼nleri al
         target_urun_anahtarlari = target_data.apply(
             lambda x: self.urun_anahtari_olustur(
-                x['Ürün Adı'], 
-                x.get('Renk Açıklaması', ''), 
+                x['ÃœrÃ¼n AdÄ±'], 
+                x.get('Renk AÃ§Ä±klamasÄ±', ''), 
                 x.get('Beden', '')
             ), axis=1
         ).unique()
 
         for urun_anahtari in target_urun_anahtarlari:
-            # Hedef mağazadaki bu ürünün verilerini al
+            # Hedef maÄŸazadaki bu Ã¼rÃ¼nÃ¼n verilerini al
             target_urun_data = target_data[
                 target_data.apply(lambda x: self.urun_anahtari_olustur(
-                    x['Ürün Adı'], x.get('Renk Açıklaması', ''), x.get('Beden', '')
+                    x['ÃœrÃ¼n AdÄ±'], x.get('Renk AÃ§Ä±klamasÄ±', ''), x.get('Beden', '')
                 ), axis=1) == urun_anahtari
             ]
             
@@ -533,10 +448,10 @@ class MagazaTransferSistemi:
             alan_satis = target_row['Satis']
             alan_envanter = target_row['Envanter']
             
-            # Diğer mağazalarda aynı ürünü ara
+            # DiÄŸer maÄŸazalarda aynÄ± Ã¼rÃ¼nÃ¼ ara
             for gonderen_magaza in diger_magazalar:
                 gonderen_urun_data = tum_data[
-                    (tum_data['Depo Adı'] == gonderen_magaza) &
+                    (tum_data['Depo AdÄ±'] == gonderen_magaza) &
                     (tum_data['urun_anahtari'] == urun_anahtari)
                 ]
                 
@@ -547,8 +462,8 @@ class MagazaTransferSistemi:
                 gonderen_satis = gonderen_row['Satis']
                 gonderen_envanter = gonderen_row['Envanter']
                 
-                # Transfer koşullarını kontrol et
-                kosul_sonuc, kosul_mesaj = self.transfer_kosulları_kontrol(
+                # Transfer koÅŸullarÄ±nÄ± kontrol et
+                kosul_sonuc, kosul_mesaj = self.transfer_kosullarÄ±_kontrol(
                     gonderen_satis, gonderen_envanter, alan_satis, alan_envanter, strategy
                 )
                 
@@ -560,9 +475,9 @@ class MagazaTransferSistemi:
                     if transfer_miktari > 0:
                         transferler.append({
                             'urun_anahtari': urun_anahtari,
-                            'urun_kodu': gonderen_row['Ürün Kodu'],
-                            'urun_adi': gonderen_row['Ürün Adı'],
-                            'renk': gonderen_row.get('Renk Açıklaması', ''),
+                            'urun_kodu': gonderen_row['ÃœrÃ¼n Kodu'],
+                            'urun_adi': gonderen_row['ÃœrÃ¼n AdÄ±'],
+                            'renk': gonderen_row.get('Renk AÃ§Ä±klamasÄ±', ''),
                             'beden': gonderen_row.get('Beden', ''),
                             'gonderen_magaza': gonderen_magaza,
                             'alan_magaza': target_store,
@@ -578,10 +493,10 @@ class MagazaTransferSistemi:
                             'transfer_tipi': 'targeted'
                         })
 
-        # STR farkına göre sırala
+        # STR farkÄ±na gÃ¶re sÄ±rala
         transferler.sort(key=lambda x: x['str_farki'], reverse=True)
         
-        logger.info(f"Spesifik mağaza analizi tamamlandı: {len(transferler)} transfer önerisi")
+        logger.info(f"Spesifik maÄŸaza analizi tamamlandÄ±: {len(transferler)} transfer Ã¶nerisi")
         
         result = {
             'analiz_tipi': 'targeted',
@@ -595,7 +510,7 @@ class MagazaTransferSistemi:
         return result
 
     def global_transfer_analizi_yap(self, strategy='sakin', excluded_stores=None):
-        """Global ürün bazlı transfer analizi - Strategy ve excluded_stores parametreli"""
+        """Global Ã¼rÃ¼n bazlÄ± transfer analizi - Strategy ve excluded_stores parametreli"""
         if self.data is None:
             return None
 
@@ -616,7 +531,7 @@ class MagazaTransferSistemi:
         transferler = []
         transfer_gereksiz = []
 
-        # TÜM mağazaların ürünlerini grupla (ürün adı + renk + beden)
+        # TÜM mağazalarının ürünlerini grupla (ürün adı + renk + beden)
         tum_data = self.data.copy()
         
         # İstisna mağazaları filtrele
@@ -695,7 +610,7 @@ class MagazaTransferSistemi:
             en_yuksek_str = magaza_str_listesi[-1]
 
             # Transfer koşullarını kontrol et - Strategy parametreli
-            kosul_sonuc, kosul_mesaj = self.transfer_kosulları_kontrol(
+            kosul_sonuc, kosul_mesaj = self.transfer_koşulları_kontrol(
                 en_dusuk_str['satis'], en_dusuk_str['envanter'], 
                 en_yuksek_str['satis'], en_yuksek_str['envanter'],
                 strategy
@@ -804,9 +719,7 @@ def health_check():
         'transfer_type': sistem.transfer_type,
         'target_store': sistem.target_store,
         'excluded_stores': sistem.excluded_stores,
-        'available_strategies': list(STRATEGY_CONFIG.keys()),
-        'beden_haritasi_loaded': len(BEDEN_HARITASI) > 0,
-        'beden_haritasi_count': len(BEDEN_HARITASI)
+        'available_strategies': list(STRATEGY_CONFIG.keys())
     })
 
 @app.route('/upload', methods=['POST'])
@@ -1152,6 +1065,4 @@ if __name__ == '__main__':
     debug_mode = os.environ.get('FLASK_ENV') != 'production'
     
     logger.info(f"Starting RetailFlow API v6.0 on port {port}")
-    logger.info(f"Beden haritası yüklendi: {len(BEDEN_HARITASI)} ürün")
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
-
