@@ -242,9 +242,7 @@ class MagazaTransferSistemi:
         """STR bazli transfer kosullari kontrol - Strategy parametreli"""
         config = STRATEGY_CONFIG.get(strategy, STRATEGY_CONFIG['sakin'])
         
-        if alan_satis <= gonderen_satis:
-            return False, f"Alan satis ({alan_satis}) <= Gonderen satis ({gonderen_satis})"
-        
+                
         if gonderen_envanter < config['min_inventory']:
             return False, f"Gonderen envanter yetersiz ({gonderen_envanter} < {config['min_inventory']})"
         
@@ -392,7 +390,217 @@ class MagazaTransferSistemi:
         self.save_to_temp()
         return result
 
-    def targeted_transfer_analizi_yap(self, target_store, strategy='sakin', excluded_stores=None):
+    
+
+def targeted_transfer_analizi_yap(self, target_store, strategy='sakin', excluded_stores=None):
+        """Spesifik magaza icin transfer analizi - Sadece bu magazayi alan olarak analiz et
+        HIZLANDIRMA + Merkez/Online onceligi: donor seciminde once 'Merkez Depo' ve 'Online' kontrol edilir.
+        """
+        if self.data is None:
+            return None
+
+        self.current_strategy = strategy
+        self.target_store = target_store
+        self.transfer_type = 'targeted'
+        if excluded_stores is None:
+            excluded_stores = []
+        self.excluded_stores = excluded_stores
+
+        logger.info(f"Spesifik magaza analizi baslatiliyor... Hedef: {target_store}, Strateji: {strategy}")
+
+        df = self.data.copy()
+
+        # urun_anahtari ve STR yoksa olustur
+        if 'urun_anahtari' not in df.columns:
+            df['urun_anahtari'] = df.apply(
+                lambda r: urun_anahtari_olustur(r['Urun Adi'], r['Renk Aciklamasi'], r['Beden']), axis=1
+            )
+        if 'STR' not in df.columns:
+            denom = (df['Satis'] + df['Envanter']).astype(float)
+            df['STR'] = 0.0
+            nz = denom > 0
+            df.loc[nz, 'STR'] = (df.loc[nz, 'Satis'] / denom.loc[nz]).astype(float)
+
+        # Excluded stores filtre
+        if excluded_stores:
+            df = df[~df['Depo Adi'].isin(excluded_stores)]
+
+        gruplar = {k: g.copy() for k, g in df.groupby('urun_anahtari', sort=False)}
+        target_rows = df[df['Depo Adi'] == target_store]
+        hedef_anahtarlar = list(target_rows['urun_anahtari'].unique())
+        toplam = len(hedef_anahtarlar)
+
+        transferler = []
+        oncelik_set = set(['Merkez Depo', 'Online'])
+
+        for i, urun_anahtari in enumerate(hedef_anahtarlar, 1):
+            if i % 100 == 0 or i == toplam:
+                logger.info(f"Spesifik ilerleme: {i}/{toplam} anahtar islendi")
+
+            g = gruplar.get(urun_anahtari)
+            if g is None or g.empty:
+                continue
+
+            t = g[g['Depo Adi'] == target_store]
+            if t.empty:
+                continue
+            t = t.iloc[0]
+            alan_satis = int(t['Satis']); alan_envanter = int(t['Envanter'])
+
+            donors = g[g['Depo Adi'] != target_store].copy()
+            if donors.empty:
+                continue
+
+            # 1) ONCELIK: Merkez/Online
+            prio = donors[donors['Depo Adi'].isin(oncelik_set)].copy()
+            en_iyi = None
+            if not prio.empty:
+                prio_ge2 = prio[prio['Envanter'] >= 2].copy().sort_values(['Envanter','Depo Adi'], ascending=[False, True])
+                for _, d in prio_ge2.iterrows():
+                    g_s, g_e = int(d['Satis']), int(d['Envanter'])
+                    uygun_mu, _ = self.transfer_kosullari_kontrol(g_s, g_e, alan_satis, alan_envanter, strategy)
+                    if not uygun_mu:
+                        continue
+                    miktar, str_detaylar = self.str_bazli_transfer_hesapla(g_s, g_e, alan_satis, alan_envanter, strategy)
+                    if miktar > 0:
+                        gonderen_row = d; gonderen_magaza = d['Depo Adi']
+                        transferler.append({
+                            'urun_anahtari': urun_anahtari,
+                            'urun_kodu': gonderen_row.get('Urun Kodu', ''),
+                            'urun_adi': gonderen_row['Urun Adi'],
+                            'renk': gonderen_row.get('Renk Aciklamasi', ''),
+                            'beden': gonderen_row.get('Beden', ''),
+                            'gonderen_magaza': gonderen_magaza,
+                            'alan_magaza': target_store,
+                            'transfer_miktari': int(miktar),
+                            'gonderen_satis': int(g_s),
+                            'gonderen_envanter': int(g_e),
+                            'alan_satis': int(alan_satis),
+                            'alan_envanter': int(alan_envanter),
+                            'gonderen_str': str_detaylar['gonderen_str'],
+                            'alan_str': str_detaylar['alan_str'],
+                            'str_farki': str_detaylar['str_farki'],
+                            'kullanilan_strateji': strategy,
+                            'transfer_tipi': 'targeted'
+                        })
+                        en_iyi = True
+                        break
+                if not en_iyi:
+                    prio_eq1 = prio[prio['Envanter'] == 1].copy().sort_values(['Depo Adi'], ascending=[True])
+                    for _, d in prio_eq1.iterrows():
+                        g_s, g_e = int(d['Satis']), int(d['Envanter'])
+                        uygun_mu, _ = self.transfer_kosullari_kontrol(g_s, g_e, alan_satis, alan_envanter, strategy)
+                        if not uygun_mu:
+                            continue
+                        miktar, str_detaylar = self.str_bazli_transfer_hesapla(g_s, g_e, alan_satis, alan_envanter, strategy)
+                        if miktar > 0:
+                            gonderen_row = d; gonderen_magaza = d['Depo Adi']
+                            transferler.append({
+                                'urun_anahtari': urun_anahtari,
+                                'urun_kodu': gonderen_row.get('Urun Kodu', ''),
+                                'urun_adi': gonderen_row['Urun Adi'],
+                                'renk': gonderen_row.get('Renk Aciklamasi', ''),
+                                'beden': gonderen_row.get('Beden', ''),
+                                'gonderen_magaza': gonderen_magaza,
+                                'alan_magaza': target_store,
+                                'transfer_miktari': int(miktar),
+                                'gonderen_satis': int(g_s),
+                                'gonderen_envanter': int(g_e),
+                                'alan_satis': int(alan_satis),
+                                'alan_envanter': int(alan_envanter),
+                                'gonderen_str': str_detaylar['gonderen_str'],
+                                'alan_str': str_detaylar['alan_str'],
+                                'str_farki': str_detaylar['str_farki'],
+                                'kullanilan_strateji': strategy,
+                                'transfer_tipi': 'targeted'
+                            })
+                            en_iyi = True
+                            break
+                if en_iyi:
+                    continue  # bu anahtar icin kayit yapildi
+
+            # 2) Diger magazalar: Envanter >=2 -> STR kucuk (esitse envanter buyuk), sonra =1
+            others = donors[~donors['Depo Adi'].isin(oncelik_set)].copy()
+            if not others.empty:
+                ge2 = others[others['Envanter'] >= 2].copy().sort_values(['STR','Envanter'], ascending=[True, False])
+                kaydedildi = False
+                for _, d in ge2.head(10).iterrows():
+                    g_s, g_e = int(d['Satis']), int(d['Envanter'])
+                    uygun_mu, _ = self.transfer_kosullari_kontrol(g_s, g_e, alan_satis, alan_envanter, strategy)
+                    if not uygun_mu:
+                        continue
+                    miktar, str_detaylar = self.str_bazli_transfer_hesapla(g_s, g_e, alan_satis, alan_envanter, strategy)
+                    if miktar > 0:
+                        gonderen_row = d; gonderen_magaza = d['Depo Adi']
+                        transferler.append({
+                            'urun_anahtari': urun_anahtari,
+                            'urun_kodu': gonderen_row.get('Urun Kodu', ''),
+                            'urun_adi': gonderen_row['Urun Adi'],
+                            'renk': gonderen_row.get('Renk Aciklamasi', ''),
+                            'beden': gonderen_row.get('Beden', ''),
+                            'gonderen_magaza': gonderen_magaza,
+                            'alan_magaza': target_store,
+                            'transfer_miktari': int(miktar),
+                            'gonderen_satis': int(g_s),
+                            'gonderen_envanter': int(g_e),
+                            'alan_satis': int(alan_satis),
+                            'alan_envanter': int(alan_envanter),
+                            'gonderen_str': str_detaylar['gonderen_str'],
+                            'alan_str': str_detaylar['alan_str'],
+                            'str_farki': str_detaylar['str_farki'],
+                            'kullanilan_strateji': strategy,
+                            'transfer_tipi': 'targeted'
+                        })
+                        kaydedildi = True
+                        break
+                if kaydedildi:
+                    continue
+                eq1 = others[others['Envanter'] == 1].copy().sort_values(['STR','Depo Adi'], ascending=[True, True])
+                for _, d in eq1.head(10).iterrows():
+                    g_s, g_e = int(d['Satis']), int(d['Envanter'])
+                    uygun_mu, _ = self.transfer_kosullari_kontrol(g_s, g_e, alan_satis, alan_envanter, strategy)
+                    if not uygun_mu:
+                        continue
+                    miktar, str_detaylar = self.str_bazli_transfer_hesapla(g_s, g_e, alan_satis, alan_envanter, strategy)
+                    if miktar > 0:
+                        gonderen_row = d; gonderen_magaza = d['Depo Adi']
+                        transferler.append({
+                            'urun_anahtari': urun_anahtari,
+                            'urun_kodu': gonderen_row.get('Urun Kodu', ''),
+                            'urun_adi': gonderen_row['Urun Adi'],
+                            'renk': gonderen_row.get('Renk Aciklamasi', ''),
+                            'beden': gonderen_row.get('Beden', ''),
+                            'gonderen_magaza': gonderen_magaza,
+                            'alan_magaza': target_store,
+                            'transfer_miktari': int(miktar),
+                            'gonderen_satis': int(g_s),
+                            'gonderen_envanter': int(g_e),
+                            'alan_satis': int(alan_satis),
+                            'alan_envanter': int(alan_envanter),
+                            'gonderen_str': str_detaylar['gonderen_str'],
+                            'alan_str': str_detaylar['alan_str'],
+                            'str_farki': str_detaylar['str_farki'],
+                            'kullanilan_strateji': strategy,
+                            'transfer_tipi': 'targeted'
+                        })
+                        break
+
+        # STR farkina gore sirala
+        transferler.sort(key=lambda x: x['str_farki'], reverse=True)
+
+        logger.info(f"Spesifik magaza analizi tamamlandi: {len(transferler)} transfer onerisi")
+
+        result = {
+            'analiz_tipi': 'targeted',
+            'strateji': strategy,
+            'target_store': target_store,
+            'excluded_stores': excluded_stores,
+            'transferler': transferler
+        }
+
+        self.save_to_temp()
+        return result
+def targeted_transfer_analizi_yap(self, target_store, strategy='sakin', excluded_stores=None):
         """Spesifik magaza icin transfer analizi - Sadece bu magazayi alan olarak analiz et"""
         if self.data is None:
             return None
@@ -414,7 +622,15 @@ class MagazaTransferSistemi:
         
         if target_data.empty:
             logger.warning(f"Hedef magaza '{target_store}' icin veri bulunamadi")
-            return None
+            result = {
+                'analiz_tipi': 'targeted',
+                'strateji': strategy,
+                'target_store': target_store,
+                'excluded_stores': excluded_stores,
+                'transferler': []
+            }
+            self.save_to_temp()
+            return result
 
         # Diger magazalardan bu magazaya transfer analizi
         diger_magazalar = [m for m in self.magazalar if m != target_store and m not in excluded_stores]
@@ -480,7 +696,7 @@ class MagazaTransferSistemi:
                     if transfer_miktari > 0:
                         transferler.append({
                             'urun_anahtari': urun_anahtari,
-                            'urun_kodu': gonderen_row['Urun Kodu'],
+                            'urun_kodu': gonderen_row.get('Urun Kodu', ''),
                             'urun_adi': gonderen_row['Urun Adi'],
                             'renk': gonderen_row.get('Renk Aciklamasi', ''),
                             'beden': gonderen_row.get('Beden', ''),
