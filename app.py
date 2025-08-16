@@ -1254,6 +1254,7 @@ def export_excel():
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             # Ana transfer sayfasi
             if transferler:
+                df_transfer = pd.DataFrame(transferler)
                 
                 if analiz_tipi == 'size_completion':
                     selected_columns = {
@@ -1329,6 +1330,11 @@ def export_excel():
                             pass
                     adjusted_width = min(max_length + 2, 50)
                     worksheet.column_dimensions[column_letter].width = adjusted_width
+            else:
+                # Eğer transfer yoksa boş sayfa oluştur
+                df_empty = pd.DataFrame({'Mesaj': ['Hiç transfer önerisi bulunamadı']})
+                df_empty.to_excel(writer, index=False, sheet_name='Sonuçlar')
+            
             
             # Analiz ozeti sayfasi
             summary_info = {
