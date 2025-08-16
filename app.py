@@ -123,6 +123,19 @@ class MagazaTransferSistemi:
             
             logger.info(f"Bulunan sutunlar: {list(df.columns)}")
             
+            # TURKCE SUTUN ADLARINI INGILIZCE'YE CEVIR
+            column_mapping = {
+                'Depo Adı': 'Depo Adi',
+                'Ürün Kodu': 'Urun Kodu', 
+                'Ürün Adı': 'Urun Adi',
+                'Renk Açıklaması': 'Renk Aciklamasi',
+                # Beden ve Satis, Envanter zaten problem yok
+            }
+            
+            # Sutun adlarini yeniden adlandir
+            df = df.rename(columns=column_mapping)
+            logger.info(f"Sutunlar cevrildikten sonra: {list(df.columns)}")
+            
             gerekli_sutunlar = ['Depo Adi', 'Urun Kodu', 'Urun Adi', 'Satis', 'Envanter']
             eksik_sutunlar = [s for s in gerekli_sutunlar if s not in df.columns]
             
@@ -660,7 +673,7 @@ class MagazaTransferSistemi:
                         'magaza_sayisi': len(magaza_str_listesi),
                         'min_str': round(en_dusuk_str['str'] * 100, 1),
                         'max_str': round(en_yuksek_str['str'] * 100, 1),
-                        'satis_farki': int(en_yuksek_str['satis'] - en_dusuk_str['satis']),
+                        'salis_farki': int(en_yuksek_str['satis'] - en_dusuk_str['satis']),
                         'envanter_farki': int(en_dusuk_str['envanter'] - en_yuksek_str['envanter'])
                     })
             else:
@@ -917,29 +930,29 @@ def export_excel():
                 # Temel sutunlar
                 if analiz_tipi == 'size_completion':
                     selected_columns = {
-                        'urun_adi': 'Urun Adi',
+                        'urun_adi': 'Ürün Adı',
                         'renk': 'Renk',
                         'beden': 'Eksik Beden',
-                        'gonderen_magaza': 'Gonderen Magaza',
-                        'alan_magaza': 'Hedef Magaza',
-                        'transfer_miktari': 'Transfer Miktari',
-                        'gonderen_envanter': 'Gonderen Envanter',
+                        'gonderen_magaza': 'Gönderen Mağaza',
+                        'alan_magaza': 'Hedef Mağaza',
+                        'transfer_miktari': 'Transfer Miktarı',
+                        'gonderen_envanter': 'Gönderen Envanter',
                         'kullanilan_strateji': 'Strateji'
                     }
                     sheet_name = f'{target_store} Beden Tamamlama'
                 else:
                     selected_columns = {
-                        'urun_kodu': 'Urun Kodu',
-                        'urun_adi': 'Urun Adi',
+                        'urun_kodu': 'Ürün Kodu',
+                        'urun_adi': 'Ürün Adı',
                         'renk': 'Renk',
                         'beden': 'Beden',
-                        'gonderen_magaza': 'Gonderen Magaza',
-                        'alan_magaza': 'Alan Magaza',
-                        'transfer_miktari': 'Transfer Miktari',
-                        'str_farki': 'STR Farki (%)',
+                        'gonderen_magaza': 'Gönderen Mağaza',
+                        'alan_magaza': 'Alan Mağaza',
+                        'transfer_miktari': 'Transfer Miktarı',
+                        'str_farki': 'STR Farkı (%)',
                         'kullanilan_strateji': 'Strateji'
                     }
-                    sheet_name = f'{target_store} Transferleri' if analiz_tipi == 'targeted' else 'Transfer Onerileri'
+                    sheet_name = f'{target_store} Transferleri' if analiz_tipi == 'targeted' else 'Transfer Önerileri'
                 
                 # Mevcut sutunlari filtrele
                 available_columns = {k: v for k, v in selected_columns.items() if k in df_transfer.columns}
@@ -951,18 +964,18 @@ def export_excel():
             # Analiz ozeti sayfasi
             summary_info = {
                 'Analiz Tipi': [analiz_tipi.upper()],
-                'Kullanilan Strateji': [strategy],
-                'Hedef Magaza': [target_store or 'Tum Magazalar'],
+                'Kullanılan Strateji': [strategy],
+                'Hedef Mağaza': [target_store or 'Tüm Mağazalar'],
                 'Toplam Transfer': [len(transferler)],
-                'Istisna Magaza Sayisi': [len(sistem.excluded_stores)],
+                'İstisna Mağaza Sayısı': [len(sistem.excluded_stores)],
                 'Analiz Tarihi': [datetime.now().strftime('%Y-%m-%d %H:%M')]
             }
             
             if sistem.excluded_stores:
-                summary_info['Istisna Magazalar'] = [', '.join(sistem.excluded_stores)]
+                summary_info['İstisna Mağazalar'] = [', '.join(sistem.excluded_stores)]
             
             df_summary = pd.DataFrame(summary_info)
-            df_summary.to_excel(writer, index=False, sheet_name='Analiz Ozeti')
+            df_summary.to_excel(writer, index=False, sheet_name='Analiz Özeti')
         
         output.seek(0)
         
@@ -1067,4 +1080,3 @@ if __name__ == '__main__':
     
     logger.info(f"Starting RetailFlow API v6.0 on port {port}")
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
-
