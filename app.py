@@ -187,15 +187,32 @@ class MagazaTransferSistemi:
             return df
 
     def create_product_key_vectorized(self, df):
-        """Vectorized urun anahtari olustur - HIZLI YÖNTEM"""
+        """Vectorized urun anahtari olustur - HIZLI YÖNTEM - Categorical fix"""
         try:
             logger.info("Creating product keys using vectorized operations...")
             start_time = time.time()
             
+            # Categorical sütunları string'e çevir (vectorized operations için)
+            if df['Urun Adi'].dtype.name == 'category':
+                df['Urun Adi'] = df['Urun Adi'].astype(str)
+            
             # Vectorized string operations
             urun_adi = df['Urun Adi'].fillna('').astype(str).str.strip().str.upper()
-            renk = df.get('Renk Aciklamasi', pd.Series([''] * len(df))).fillna('').astype(str).str.strip().str.upper()
-            beden = df.get('Beden', pd.Series([''] * len(df))).fillna('').astype(str).str.strip().str.upper()
+            
+            # Renk ve Beden sütunları varsa işle
+            if 'Renk Aciklamasi' in df.columns:
+                if df['Renk Aciklamasi'].dtype.name == 'category':
+                    df['Renk Aciklamasi'] = df['Renk Aciklamasi'].astype(str)
+                renk = df['Renk Aciklamasi'].fillna('').astype(str).str.strip().str.upper()
+            else:
+                renk = pd.Series([''] * len(df))
+            
+            if 'Beden' in df.columns:
+                if df['Beden'].dtype.name == 'category':
+                    df['Beden'] = df['Beden'].astype(str)
+                beden = df['Beden'].fillna('').astype(str).str.strip().str.upper()
+            else:
+                beden = pd.Series([''] * len(df))
             
             # Combine them
             df['urun_anahtari'] = (urun_adi + ' ' + renk + ' ' + beden).str.strip()
