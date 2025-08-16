@@ -981,7 +981,536 @@ class MagazaTransferSistemi:
         self.save_to_temp()
         return result
 
-    def simulate_transfer_impact(self, transfers):
+    def analyze_transfer_impact(self):
+        """Transfer Impact Dashboard analizi"""
+        try:
+            if not self.mevcut_analiz or not self.mevcut_analiz.get('transferler'):
+                return {'error': 'No transfer analysis available'}
+            
+            transferler = self.mevcut_analiz['transferler']
+            analiz_tipi = self.mevcut_analiz.get('analiz_tipi', 'global')
+            
+            # Temel metrikler
+            total_transfers = len(transferler)
+            total_items_moved = sum(t.get('transfer_miktari', 0) for t in transferler)
+            affected_stores = len(set([t.get('gonderen_magaza', '') for t in transferler] + 
+                                    [t.get('alan_magaza', '') for t in transferler]))
+            
+            # STR iyileştirme analizi
+            str_improvements = []
+            category_analysis = {}
+            store_impact = {}
+            
+            for transfer in transferler:
+                # STR iyileştirme
+                str_farki = transfer.get('str_farki', 0)
+                if str_farki > 0:
+                    str_improvements.append(str_farki)
+                
+                # Kategori analizi (ürün adına göre)
+                urun_adi = transfer.get('urun_adi', 'Unknown')
+                category = urun_adi.split()[0] if urun_adi else 'Unknown'  # İlk kelime kategori
+                if category not in category_analysis:
+                    category_analysis[category] = {'count': 0, 'items': 0}
+                category_analysis[category]['count'] += 1
+                category_analysis[category]['items'] += transfer.get('transfer_miktari', 0)
+                
+                # Mağaza bazında etki
+                alan_magaza = transfer.get('alan_magaza', '')
+                if alan_magaza:
+                    if alan_magaza not in store_impact:
+                        store_impact[alan_magaza] = {
+                            'incoming_transfers': 0,
+                            'incoming_items': 0,
+                            'avg_str_improvement': 0,
+                            'str_improvements': []
+                        }
+                    store_impact[alan_magaza]['incoming_transfers'] += 1
+                    store_impact[alan_magaza]['incoming_items'] += transfer.get('transfer_miktari', 0)
+                    store_impact[alan_magaza]['str_improvements'].append(str_farki)
+            
+            # STR iyileştirme ortalaması
+            avg_str_improvement = sum(str_improvements) / len(str_improvements) if str_improvements else 0
+            
+            # Mağaza bazında ortalamalar
+            for store in store_impact:
+                improvements = store_impact[store]['str_improvements']
+                store_impact[store]['avg_str_improvement'] = sum(improvements) / len(improvements) if improvements else 0
+                del store_impact[store]['str_improvements']  # Temizle
+            
+            # Top kategoriler (Chart.js için)
+            top_categories = sorted(category_analysis.items(), key=lambda x: x[1]['items'], reverse=True)[:10]
+            
+            # Top impact stores (Chart.js için)
+            top_stores = sorted(store_impact.items(), key=lambda x: x[1]['incoming_items'], reverse=True)[:10]
+            
+            return {
+                'success': True,
+                'analysis_type': analiz_tipi,
+                'metrics': {
+                    'total_transfers': total_transfers,
+                    'total_items_moved': total_items_moved,
+                    'affected_stores': affected_stores,
+                    'avg_str_improvement': round(avg_str_improvement, 2)
+                },
+                'charts': {
+                    'category_distribution': {
+                        'labels': [cat[0] for cat in top_categories],
+                        'data': [cat[1]['items'] for cat in top_categories],
+                        'transfers': [cat[1]['count'] for cat in top_categories]
+                    },
+                    'store_impact': {
+                        'labels': [store[0] for store in top_stores],
+                        'data': [store[1]['incoming_items'] for store in top_stores],
+                        'transfers': [store[1]['incoming_transfers'] for store in top_stores],
+                        'str_improvements': [round(store[1]['avg_str_improvement'], 1) for store in top_stores]
+                    }
+                },
+                'top_opportunities': [
+                    {
+                        'store': store[0],
+                        'potential_items': store[1]['incoming_items'],
+                        'transfer_count': store[1]['incoming_transfers'],
+                        'str_boost': round(store[1]['avg_str_improvement'], 1)
+                    }
+                    for store in top_stores[:5]
+                ]
+            }
+        except Exception as e:
+            logger.error(f"Transfer impact analysis error: {e}")
+            return {'error': str(e)}
+
+    def analyze_store_performance(self):
+        """Mağaza Performance Skorları analizi"""
+        try:
+            if self.data is None:
+                return {'error': 'No data available'}
+            
+            metrikler = self.magaza_metrikleri_hesapla()
+            performance_scores = []
+            
+            for magaza, metrics in metrikler.items():
+                # STR skoru (40% ağırlık)
+                str_rate = metrics['satis_orani']
+                str_score = min(str_rate * 100, 100)  # Max 100 puan
+                
+                # Envanter efficiency skoru (25% ağırlık)
+                total_products = metrics['toplam_satis'] + metrics['toplam_envanter']
+                inventory_turnover = metrics['toplam_satis'] / metrics['toplam_envanter'] if metrics['toplam_envanter'] > 0 else 0
+                inventory_score = min(inventory_turnover * 50, 100)  # Max 100 puan
+                
+                # Ürün çeşitliliği skoru (20% ağırlık)
+                variety_score = min(metrics['urun_sayisi'] / 100 * 100, 100)  # Max 100 puan
+                
+                # Transfer potansiyeli skoru (15% ağırlık) - ters orantılı
+                excess_ratio = metrics['envanter_fazlasi'] / total_products if total_products > 0 else 0
+                transfer_score = max(100 - (excess_ratio * 100), 0)
+                
+                # Toplam skor hesaplama
+                total_score = (
+                    str_score * 0.4 +
+                    inventory_score * 0.25 +
+                    variety_score * 0.2 +
+                    transfer_score * 0.15
+                )
+                
+                # Performance seviyesi belirleme
+                if total_score >= 80:
+                    level = 'Excellent'
+                    color = '#10B981'  # Green
+                    status = '🟢'
+                elif total_score >= 60:
+                    level = 'Good'
+                    color = '#F59E0B'  # Yellow
+                    status = '🟡'
+                elif total_score >= 40:
+                    level = 'Needs Attention'
+                    color = '#F97316'  # Orange
+                    status = '🟠'
+                else:
+                    level = 'Critical'
+                    color = '#EF4444'  # Red
+                    status = '🔴'
+                
+                # Aksiyon önerisi
+                if str_rate < 0.3:
+                    action = f"STR artırılmalı - Transfer alması öneriliyor"
+                elif excess_ratio > 0.5:
+                    action = f"Envanter fazlası var - Transfer vermeli"
+                else:
+                    action = f"Performans iyi - Mevcut durumu koruyun"
+                
+                performance_scores.append({
+                    'store_name': magaza,
+                    'total_score': round(total_score, 1),
+                    'level': level,
+                    'color': color,
+                    'status': status,
+                    'action': action,
+                    'metrics': {
+                        'str_score': round(str_score, 1),
+                        'inventory_score': round(inventory_score, 1),
+                        'variety_score': round(variety_score, 1),
+                        'transfer_score': round(transfer_score, 1)
+                    },
+                    'raw_data': {
+                        'str_rate': round(str_rate * 100, 1),
+                        'inventory_turnover': round(inventory_turnover, 2),
+                        'product_count': metrics['urun_sayisi'],
+                        'excess_ratio': round(excess_ratio * 100, 1)
+                    }
+                })
+            
+            # Skorlara göre sırala
+            performance_scores.sort(key=lambda x: x['total_score'], reverse=True)
+            
+            # Chart.js için veri hazırla
+            chart_data = {
+                'labels': [store['store_name'] for store in performance_scores],
+                'scores': [store['total_score'] for store in performance_scores],
+                'colors': [store['color'] for store in performance_scores],
+                'str_rates': [store['raw_data']['str_rate'] for store in performance_scores]
+            }
+            
+            # Seviye dağılımı
+            level_distribution = {}
+            for store in performance_scores:
+                level = store['level']
+                if level not in level_distribution:
+                    level_distribution[level] = 0
+                level_distribution[level] += 1
+            
+            return {
+                'success': True,
+                'stores': performance_scores,
+                'charts': {
+                    'performance_ranking': chart_data,
+                    'level_distribution': {
+                        'labels': list(level_distribution.keys()),
+                        'data': list(level_distribution.values()),
+                        'colors': ['#10B981', '#F59E0B', '#F97316', '#EF4444']
+                    }
+                },
+                'summary': {
+                    'total_stores': len(performance_scores),
+                    'excellent_stores': level_distribution.get('Excellent', 0),
+                    'critical_stores': level_distribution.get('Critical', 0),
+                    'avg_score': round(sum(s['total_score'] for s in performance_scores) / len(performance_scores), 1)
+                }
+            }
+        except Exception as e:
+            logger.error(f"Store performance analysis error: {e}")
+            return {'error': str(e)}
+
+    def analyze_smart_recommendations(self):
+        """Akıllı Transfer Önerileri analizi"""
+        try:
+            if self.data is None or not self.mevcut_analiz:
+                return {'error': 'No data or analysis available'}
+            
+            transferler = self.mevcut_analiz.get('transferler', [])
+            analiz_tipi = self.mevcut_analiz.get('analiz_tipi', 'global')
+            
+            # Ürün grubu analizi
+            product_patterns = {}
+            size_patterns = {}
+            color_patterns = {}
+            priority_sources = {'Merkez Depo': 0, 'Online': 0, 'Other': 0}
+            
+            for transfer in transferler:
+                urun_adi = transfer.get('urun_adi', '')
+                renk = transfer.get('renk', '')
+                beden = transfer.get('beden', '')
+                gonderen = transfer.get('gonderen_magaza', '')
+                
+                # Ürün grubu (ilk kelime)
+                product_group = urun_adi.split()[0] if urun_adi else 'Unknown'
+                if product_group not in product_patterns:
+                    product_patterns[product_group] = {'count': 0, 'avg_str_improvement': 0, 'str_total': 0}
+                product_patterns[product_group]['count'] += 1
+                product_patterns[product_group]['str_total'] += transfer.get('str_farki', 0)
+                
+                # Beden analizi
+                if beden and beden != '':
+                    if beden not in size_patterns:
+                        size_patterns[beden] = 0
+                    size_patterns[beden] += 1
+                
+                # Renk analizi
+                if renk and renk != '':
+                    if renk not in color_patterns:
+                        color_patterns[renk] = 0
+                    color_patterns[renk] += 1
+                
+                # Öncelikli kaynak analizi
+                if gonderen in ['Merkez Depo', 'Online']:
+                    priority_sources[gonderen] += 1
+                else:
+                    priority_sources['Other'] += 1
+            
+            # Ortalama STR iyileştirmeleri hesapla
+            for group in product_patterns:
+                count = product_patterns[group]['count']
+                if count > 0:
+                    product_patterns[group]['avg_str_improvement'] = round(
+                        product_patterns[group]['str_total'] / count, 2
+                    )
+            
+            # Top patterns
+            top_products = sorted(product_patterns.items(), key=lambda x: x[1]['count'], reverse=True)[:8]
+            top_sizes = sorted(size_patterns.items(), key=lambda x: x[1], reverse=True)[:10]
+            top_colors = sorted(color_patterns.items(), key=lambda x: x[1], reverse=True)[:8]
+            
+            # Transfer heatmap için mağaza kombinasyonları
+            store_combinations = {}
+            for transfer in transferler:
+                gonderen = transfer.get('gonderen_magaza', '')
+                alan = transfer.get('alan_magaza', '')
+                combo = f"{gonderen} → {alan}"
+                if combo not in store_combinations:
+                    store_combinations[combo] = 0
+                store_combinations[combo] += transfer.get('transfer_miktari', 0)
+            
+            top_combinations = sorted(store_combinations.items(), key=lambda x: x[1], reverse=True)[:10]
+            
+            # Öneriler oluştur
+            recommendations = []
+            
+            # En çok transfer edilen ürün grubu
+            if top_products:
+                top_product = top_products[0]
+                recommendations.append({
+                    'type': 'Product Focus',
+                    'title': f"{top_product[0]} ürünlerine odaklanın",
+                    'description': f"{top_product[1]['count']} transfer ile en aktif kategori",
+                    'impact': f"Ortalama STR iyileştirme: +{top_product[1]['avg_str_improvement']}%",
+                    'priority': 'High'
+                })
+            
+            # Öncelikli kaynak önerisi
+            if priority_sources['Merkez Depo'] > 0 or priority_sources['Online'] > 0:
+                total_priority = priority_sources['Merkez Depo'] + priority_sources['Online']
+                recommendations.append({
+                    'type': 'Source Strategy',
+                    'title': 'Merkez Depo ve Online önceliğini koruyun',
+                    'description': f"Transferlerin %{round(total_priority/len(transferler)*100, 1)}'i öncelikli kaynaklardan",
+                    'impact': 'Daha hızlı ve güvenilir tedarik',
+                    'priority': 'Medium'
+                })
+            
+            # Beden önerisi
+            if top_sizes:
+                top_size = top_sizes[0]
+                recommendations.append({
+                    'type': 'Size Optimization',
+                    'title': f"{top_size[0]} beden transferlerine öncelik verin",
+                    'description': f"{top_size[1]} transfer ile en çok ihtiyaç duyulan beden",
+                    'impact': 'Satış kaybını minimize eder',
+                    'priority': 'Medium'
+                })
+            
+            return {
+                'success': True,
+                'analysis_type': analiz_tipi,
+                'patterns': {
+                    'product_groups': {
+                        'labels': [p[0] for p in top_products],
+                        'data': [p[1]['count'] for p in top_products],
+                        'str_improvements': [p[1]['avg_str_improvement'] for p in top_products]
+                    },
+                    'size_distribution': {
+                        'labels': [s[0] for s in top_sizes],
+                        'data': [s[1] for s in top_sizes]
+                    },
+                    'color_distribution': {
+                        'labels': [c[0] for c in top_colors],
+                        'data': [c[1] for c in top_colors]
+                    },
+                    'source_analysis': {
+                        'labels': list(priority_sources.keys()),
+                        'data': list(priority_sources.values()),
+                        'colors': ['#3B82F6', '#10B981', '#6B7280']
+                    }
+                },
+                'top_flows': [
+                    {
+                        'combination': combo[0],
+                        'items': combo[1]
+                    }
+                    for combo in top_combinations
+                ],
+                'recommendations': recommendations,
+                'insights': {
+                    'most_active_category': top_products[0][0] if top_products else 'N/A',
+                    'priority_source_ratio': round((priority_sources['Merkez Depo'] + priority_sources['Online']) / len(transferler) * 100, 1) if transferler else 0,
+                    'top_size_demand': top_sizes[0][0] if top_sizes else 'N/A',
+                    'total_patterns': len(product_patterns)
+                }
+            }
+        except Exception as e:
+            logger.error(f"Smart recommendations analysis error: {e}")
+            return {'error': str(e)}
+
+    def analyze_executive_summary(self):
+        """Executive Summary Dashboard analizi"""
+        try:
+            if self.data is None:
+                return {'error': 'No data available'}
+            
+            # Temel veriler
+            metrikler = self.magaza_metrikleri_hesapla()
+            mevcut_analiz = self.mevcut_analiz
+            
+            # KPI hesaplamaları
+            total_stores = len(self.magazalar)
+            total_products = len(self.data)
+            total_inventory = sum(m['toplam_envanter'] for m in metrikler.values())
+            total_sales = sum(m['toplam_satis'] for m in metrikler.values())
+            overall_str = total_sales / (total_sales + total_inventory) if (total_sales + total_inventory) > 0 else 0
+            
+            # Mağaza kategorileri
+            low_performers = []
+            high_performers = []
+            
+            for magaza, metrics in metrikler.items():
+                str_rate = metrics['satis_orani']
+                if str_rate < 0.3:  # %30'un altı düşük performans
+                    low_performers.append({
+                        'name': magaza,
+                        'str_rate': round(str_rate * 100, 1),
+                        'inventory': metrics['toplam_envanter']
+                    })
+                elif str_rate > 0.7:  # %70'in üstü yüksek performans
+                    high_performers.append({
+                        'name': magaza,
+                        'str_rate': round(str_rate * 100, 1),
+                        'sales': metrics['toplam_satis']
+                    })
+            
+            # Transfer analizi varsa ekle
+            transfer_summary = {}
+            if mevcut_analiz and mevcut_analiz.get('transferler'):
+                transferler = mevcut_analiz['transferler']
+                transfer_summary = {
+                    'total_transfers': len(transferler),
+                    'total_items': sum(t.get('transfer_miktari', 0) for t in transferler),
+                    'affected_stores': len(set([t.get('gonderen_magaza', '') for t in transferler] + 
+                                             [t.get('alan_magaza', '') for t in transferler])),
+                    'avg_str_improvement': round(
+                        sum(t.get('str_farki', 0) for t in transferler) / len(transferler), 2
+                    ) if transferler else 0
+                }
+            
+            # Quick wins - Kolay iyileştirmeler
+            quick_wins = []
+            
+            # Düşük STR'li mağazalar için öneriler
+            if low_performers:
+                quick_wins.append({
+                    'title': f"{len(low_performers)} mağaza acil aksiyon gerektiriyor",
+                    'description': "STR %30'un altında olan mağazalar",
+                    'action': "Bu mağazalara transfer yapın",
+                    'impact': "Immediate sales boost",
+                    'priority': 'Critical'
+                })
+            
+            # Envanter fazlası olan mağazalar
+            excess_stores = [m for m, metrics in metrikler.items() 
+                           if metrics['envanter_fazlasi'] > metrics['toplam_satis']]
+            if excess_stores:
+                quick_wins.append({
+                    'title': f"{len(excess_stores)} mağazada envanter fazlası",
+                    'description': "Satıştan fazla envanter bulunuyor",
+                    'action': "Bu mağazalardan transfer alın",
+                    'impact': "Inventory efficiency boost",
+                    'priority': 'High'
+                })
+            
+            # Yüksek performanslılar için övgü
+            if high_performers:
+                quick_wins.append({
+                    'title': f"{len(high_performers)} mağaza champion seviyede",
+                    'description': "STR %70'in üstünde performans",
+                    'action': "Bu mağazaların best practice'lerini paylaşın",
+                    'impact': "Organization-wide improvement",
+                    'priority': 'Medium'
+                })
+            
+            # Trend analizi (basit)
+            inventory_health = 'Good'
+            if overall_str < 0.4:
+                inventory_health = 'Poor'
+            elif overall_str < 0.6:
+                inventory_health = 'Fair'
+            
+            # Chart data
+            str_distribution = {}
+            for magaza, metrics in metrikler.items():
+                str_rate = metrics['satis_orani']
+                if str_rate < 0.3:
+                    range_key = '0-30%'
+                elif str_rate < 0.5:
+                    range_key = '30-50%'
+                elif str_rate < 0.7:
+                    range_key = '50-70%'
+                else:
+                    range_key = '70%+'
+                
+                if range_key not in str_distribution:
+                    str_distribution[range_key] = 0
+                str_distribution[range_key] += 1
+            
+            return {
+                'success': True,
+                'kpis': {
+                    'total_stores': total_stores,
+                    'total_products': total_products,
+                    'total_inventory': total_inventory,
+                    'total_sales': total_sales,
+                    'overall_str': round(overall_str * 100, 1),
+                    'inventory_health': inventory_health
+                },
+                'performance_breakdown': {
+                    'high_performers': len(high_performers),
+                    'low_performers': len(low_performers),
+                    'normal_performers': total_stores - len(high_performers) - len(low_performers)
+                },
+                'transfer_summary': transfer_summary,
+                'charts': {
+                    'str_distribution': {
+                        'labels': list(str_distribution.keys()),
+                        'data': list(str_distribution.values()),
+                        'colors': ['#EF4444', '#F97316', '#F59E0B', '#10B981']
+                    },
+                    'top_performers': {
+                        'labels': [store['name'] for store in high_performers[:5]],
+                        'data': [store['str_rate'] for store in high_performers[:5]]
+                    },
+                    'attention_needed': {
+                        'labels': [store['name'] for store in low_performers[:5]],
+                        'data': [store['str_rate'] for store in low_performers[:5]]
+                    }
+                },
+                'quick_wins': quick_wins,
+                'alerts': [
+                    {
+                        'type': 'warning' if len(low_performers) > 0 else 'info',
+                        'message': f"{len(low_performers)} mağaza kritik seviyede" if low_performers else "Tüm mağazalar kabul edilebilir seviyede"
+                    },
+                    {
+                        'type': 'success' if overall_str > 0.5 else 'warning',
+                        'message': f"Genel STR: %{round(overall_str * 100, 1)} - {inventory_health}"
+                    }
+                ],
+                'action_items': [
+                    f"Öncelik 1: {quick_wins[0]['title']}" if quick_wins else "Sürdürülebilir performansı koruyun",
+                    f"Öncelik 2: {quick_wins[1]['title']}" if len(quick_wins) > 1 else "Mağaza performanslarını izleyin",
+                    "Transfer stratejisini düzenli olarak gözden geçirin"
+                ]
+            }
+        except Exception as e:
+            logger.error(f"Executive summary analysis error: {e}")
+            return {'error': str(e)}
         """Transfer etkisini simüle et"""
         try:
             if not transfers:
@@ -1592,6 +2121,63 @@ def simulate_transfers():
         logger.error(f"Simulation error: {str(e)}")
         return jsonify({'error': f'Simülasyon hatası: {str(e)}'}), 500
 
+# Analytics endpoints
+@app.route('/analytics/transfer-impact', methods=['GET'])
+def get_transfer_impact():
+    """Transfer Impact Dashboard verilerini döndür"""
+    try:
+        analysis = sistem.analyze_transfer_impact()
+        return jsonify(analysis)
+    except Exception as e:
+        logger.error(f"Transfer impact endpoint error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/analytics/store-performance', methods=['GET'])
+def get_store_performance():
+    """Mağaza Performance Skorları verilerini döndür"""
+    try:
+        analysis = sistem.analyze_store_performance()
+        return jsonify(analysis)
+    except Exception as e:
+        logger.error(f"Store performance endpoint error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/analytics/smart-recommendations', methods=['GET'])
+def get_smart_recommendations():
+    """Akıllı Transfer Önerileri verilerini döndür"""
+    try:
+        analysis = sistem.analyze_smart_recommendations()
+        return jsonify(analysis)
+    except Exception as e:
+        logger.error(f"Smart recommendations endpoint error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/analytics/executive-summary', methods=['GET'])
+def get_executive_summary():
+    """Executive Summary Dashboard verilerini döndür"""
+    try:
+        analysis = sistem.analyze_executive_summary()
+        return jsonify(analysis)
+    except Exception as e:
+        logger.error(f"Executive summary endpoint error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/analytics/all', methods=['GET'])
+def get_all_analytics():
+    """Tüm analytics verilerini tek seferde döndür"""
+    try:
+        return jsonify({
+            'success': True,
+            'timestamp': datetime.now().isoformat(),
+            'transfer_impact': sistem.analyze_transfer_impact(),
+            'store_performance': sistem.analyze_store_performance(),
+            'smart_recommendations': sistem.analyze_smart_recommendations(),
+            'executive_summary': sistem.analyze_executive_summary()
+        })
+    except Exception as e:
+        logger.error(f"All analytics endpoint error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 # Error handlers
 @app.errorhandler(413)
 def too_large(e):
@@ -1618,19 +2204,17 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('FLASK_ENV') != 'production'
     
-    logger.info(f"Starting RetailFlow API v6.1.0-optimized-fixed on port {port}")
-    logger.info("✅ All critical fixes applied:")
-    logger.info("- Syntax errors fixed")
-    logger.info("- Indentation corrected")
-    logger.info("- Sales threshold removed (✓)")
-    logger.info("- Mandatory min 1 transfer removed (✓)")
-    logger.info("- Merkez/Online priority implemented (✓)")
-    logger.info("- Vectorized operations for speed")
-    logger.info("- Memory optimization")
-    logger.info("- LRU Cache for performance")
-    logger.info("- Progress tracking")
-    logger.info("- Enhanced error handling")
-    logger.info("- Performance metrics with Excel export")
-    logger.info("- Transfer impact simulation")
+    logger.info(f"Starting RetailFlow API v6.2.0-analytics on port {port}")
+    logger.info("✅ All features included:")
+    logger.info("- Transfer analysis with priority system")
+    logger.info("- Performance optimization & caching") 
+    logger.info("- Excel export with performance metrics")
+    logger.info("🆕 ANALYTICS DASHBOARD:")
+    logger.info("- /analytics/transfer-impact - Transfer etki analizi")
+    logger.info("- /analytics/store-performance - Mağaza performans skorları")
+    logger.info("- /analytics/smart-recommendations - Akıllı öneriler")
+    logger.info("- /analytics/executive-summary - Yönetici dashboard")
+    logger.info("- /analytics/all - Tüm analytics tek seferde")
+    logger.info("🎯 Ready for Chart.js integration!")
     
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
