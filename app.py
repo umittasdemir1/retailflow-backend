@@ -356,8 +356,47 @@ class MagazaTransferSistemi:
                 logger.warning(f"'{eksik_urun_anahtari}' icin kaynak magaza bulunamadi")
                 continue
             
-            # 6. EN YUKSEK ENVANTERLI magazayi sec
-            en_iyi_kaynak = kaynak_magazalar.loc[kaynak_magazalar['Envanter'].idxmax()]
+            # 6. Donor secimi (No-zero normal, all-one fallback)
+
+            # a) En az bir donorde Envanter >= 2 varsa: STR (Satis/Envanter) en dusuk, benzerse Envanter en yuksek
+
+            # b) Herkes 1 ise: Satis > 0 olanlar oncelikli, yoksa herhangi biri
+
+            kaynak_kopya = kaynak_magazalar.copy()
+
+            kaynak_kopya['__STR__'] = kaynak_kopya.apply(lambda r: r['Satis'] / max(r['Envanter'], 1), axis=1)
+
+            aday_norm = kaynak_kopya[kaynak_kopya['Envanter'] >= 2]
+
+            if not aday_norm.empty:
+
+                aday_norm = aday_norm.sort_values(by=['__STR__', 'Envanter'], ascending=[True, False])
+
+                en_iyi_kaynak = aday_norm.iloc[0]
+
+            else:
+
+                aday_ones = kaynak_kopya[kaynak_kopya['Envanter'] == 1]
+
+                if not aday_ones.empty:
+
+                    satan = aday_ones[aday_ones['Satis'] > 0]
+
+                    if not satan.empty:
+
+                        en_iyi_kaynak = satan.sort_values(by=['Satis'], ascending=False).iloc[0]
+
+                    else:
+
+                        en_iyi_kaynak = aday_ones.iloc[0]
+
+                else:
+
+                    # Guvence: Teorik olarak buraya dusmemeli; yine de fallback
+
+                    en_iyi_kaynak = kaynak_kopya.iloc[0]
+
+            
             gonderen_magaza = en_iyi_kaynak['Depo Adi']
             gonderen_envanter = en_iyi_kaynak['Envanter']
             gonderen_satis = en_iyi_kaynak['Satis']
