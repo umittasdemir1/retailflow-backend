@@ -356,47 +356,25 @@ class MagazaTransferSistemi:
                 logger.warning(f"'{eksik_urun_anahtari}' icin kaynak magaza bulunamadi")
                 continue
             
-            # 6. Donor secimi (No-zero normal, all-one fallback)
-
-            # a) En az bir donorde Envanter >= 2 varsa: STR (Satis/Envanter) en dusuk, benzerse Envanter en yuksek
-
-            # b) Herkes 1 ise: Satis > 0 olanlar oncelikli, yoksa herhangi biri
-
-            kaynak_kopya = kaynak_magazalar.copy()
-
-            kaynak_kopya['__STR__'] = kaynak_kopya.apply(lambda r: r['Satis'] / max(r['Envanter'], 1), axis=1)
-
-            aday_norm = kaynak_kopya[kaynak_kopya['Envanter'] >= 2]
-
-            if not aday_norm.empty:
-
-                aday_norm = aday_norm.sort_values(by=['__STR__', 'Envanter'], ascending=[True, False])
-
-                en_iyi_kaynak = aday_norm.iloc[0]
-
-            else:
-
-                aday_ones = kaynak_kopya[kaynak_kopya['Envanter'] == 1]
-
-                if not aday_ones.empty:
-
-                    satan = aday_ones[aday_ones['Satis'] > 0]
-
-                    if not satan.empty:
-
-                        en_iyi_kaynak = satan.sort_values(by=['Satis'], ascending=False).iloc[0]
-
-                    else:
-
-                        en_iyi_kaynak = aday_ones.iloc[0]
-
-                else:
-
-                    # Guvence: Teorik olarak buraya dusmemeli; yine de fallback
-
-                    en_iyi_kaynak = kaynak_kopya.iloc[0]
-
             
+            # 6. GONDEREN SECIMI (Beden Tamamlama kurali)
+            # Normal durum: En az bir donorde Envanter >= 2 varsa, STR dusuk olana oncelik ver; benzerse Envanter yuksek olana
+            kaynak_magazalar = kaynak_magazalar.copy()
+            kaynak_magazalar['STR'] = kaynak_magazalar['Satis'] / kaynak_magazalar['Envanter']
+            aday_norm = kaynak_magazalar[kaynak_magazalar['Envanter'] >= 2].copy()
+            if not aday_norm.empty:
+                aday_norm = aday_norm.sort_values(by=['STR', 'Envanter'], ascending=[True, False])
+                en_iyi_kaynak = aday_norm.iloc[0]
+            else:
+                # Herkesin stogu 1 ise: once Satis = 0 olana oncelik ver, yoksa Satis en dusuk olana
+                aday_ones = kaynak_magazalar[kaynak_magazalar['Envanter'] == 1].copy()
+                if aday_ones.empty:
+                    logger.warning(f"'{eksik_urun_anahtari}' icin uygun gonderen yok (envanter yok)")
+                    continue
+                # Satis artan (0 oncelikli), sonra alfabetik olarak Depo Adi
+                aday_ones = aday_ones.sort_values(by=['Satis', 'Depo Adi'], ascending=[True, True])
+                en_iyi_kaynak = aday_ones.iloc[0]
+
             gonderen_magaza = en_iyi_kaynak['Depo Adi']
             gonderen_envanter = en_iyi_kaynak['Envanter']
             gonderen_satis = en_iyi_kaynak['Satis']
