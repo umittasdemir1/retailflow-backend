@@ -673,7 +673,7 @@ class MagazaTransferSistemi:
                         'magaza_sayisi': len(magaza_str_listesi),
                         'min_str': round(en_dusuk_str['str'] * 100, 1),
                         'max_str': round(en_yuksek_str['str'] * 100, 1),
-                        'salis_farki': int(en_yuksek_str['satis'] - en_dusuk_str['satis']),
+                        'satis_farki': int(en_yuksek_str['satis'] - en_dusuk_str['satis']),
                         'envanter_farki': int(en_dusuk_str['envanter'] - en_yuksek_str['envanter'])
                     })
             else:
@@ -906,6 +906,8 @@ def analyze_data():
 def export_excel():
     """Excel export - Transfer tipine gore ozellestirilmis"""
     try:
+        from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+        
         logger.info("Excel export request received")
         
         if not sistem.mevcut_analiz:
@@ -927,17 +929,19 @@ def export_excel():
             if transferler:
                 df_transfer = pd.DataFrame(transferler)
                 
-                # Temel sutunlar
+                # Temel sutunlar - GUNCELLENDI
                 if analiz_tipi == 'size_completion':
                     selected_columns = {
                         'urun_adi': 'Ürün Adı',
                         'renk': 'Renk',
                         'beden': 'Eksik Beden',
                         'gonderen_magaza': 'Gönderen Mağaza',
-                        'alan_magaza': 'Hedef Mağaza',
-                        'transfer_miktari': 'Transfer Miktarı',
+                        'gonderen_satis': 'Gönderen Satış',
                         'gonderen_envanter': 'Gönderen Envanter',
-                        'kullanilan_strateji': 'Strateji'
+                        'alan_magaza': 'Hedef Mağaza',
+                        'alan_satis': 'Alan Satış',
+                        'alan_envanter': 'Alan Envanter',
+                        'transfer_miktari': 'Transfer Miktarı'
                     }
                     sheet_name = f'{target_store} Beden Tamamlama'
                 else:
@@ -947,10 +951,13 @@ def export_excel():
                         'renk': 'Renk',
                         'beden': 'Beden',
                         'gonderen_magaza': 'Gönderen Mağaza',
+                        'gonderen_satis': 'Gönderen Satış',
+                        'gonderen_envanter': 'Gönderen Envanter',
                         'alan_magaza': 'Alan Mağaza',
+                        'alan_satis': 'Alan Satış',
+                        'alan_envanter': 'Alan Envanter',
                         'transfer_miktari': 'Transfer Miktarı',
-                        'str_farki': 'STR Farkı (%)',
-                        'kullanilan_strateji': 'Strateji'
+                        'str_farki': 'STR Farkı (%)'
                     }
                     sheet_name = f'{target_store} Transferleri' if analiz_tipi == 'targeted' else 'Transfer Önerileri'
                 
@@ -959,7 +966,52 @@ def export_excel():
                 df_export = df_transfer[list(available_columns.keys())].copy()
                 df_export = df_export.rename(columns=available_columns)
                 
-                df_export.to_excel(writer, index=False, sheet_name=sheet_name[:31])  # Excel sheet name limit
+                # Excel'e yaz
+                df_export.to_excel(writer, index=False, sheet_name=sheet_name[:31])
+                
+                # Worksheet'i al ve formatla
+                workbook = writer.book
+                worksheet = workbook[sheet_name[:31]]
+                
+                # Font ve style tanimlari
+                header_font = Font(name='Segoe UI', size=14, bold=True, color='FFFFFF')
+                header_fill = PatternFill(start_color='244062', end_color='244062', fill_type='solid')
+                data_font = Font(name='Segoe UI', size=11)
+                
+                # Kenarlık tanımlama
+                thin_border = Border(
+                    left=Side(style='thin'),
+                    right=Side(style='thin'),
+                    top=Side(style='thin'),
+                    bottom=Side(style='thin')
+                )
+                
+                # Header formatting (1. satır)
+                for col_num, col in enumerate(worksheet.iter_cols(max_row=1), 1):
+                    cell = col[0]
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.border = thin_border
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                
+                # Data formatting (tüm satırlar)
+                for row in worksheet.iter_rows(min_row=2):
+                    for cell in row:
+                        cell.font = data_font
+                        cell.border = thin_border
+                
+                # Sütun genişlikleri
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
             
             # Analiz ozeti sayfasi
             summary_info = {
@@ -976,6 +1028,36 @@ def export_excel():
             
             df_summary = pd.DataFrame(summary_info)
             df_summary.to_excel(writer, index=False, sheet_name='Analiz Özeti')
+            
+            # Özet sayfasını da formatla
+            summary_worksheet = workbook['Analiz Özeti']
+            
+            # Header formatting
+            for col_num, col in enumerate(summary_worksheet.iter_cols(max_row=1), 1):
+                cell = col[0]
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.border = thin_border
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+            
+            # Data formatting
+            for row in summary_worksheet.iter_rows(min_row=2):
+                for cell in row:
+                    cell.font = data_font
+                    cell.border = thin_border
+            
+            # Sütun genişlikleri
+            for column in summary_worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                summary_worksheet.column_dimensions[column_letter].width = adjusted_width
         
         output.seek(0)
         
