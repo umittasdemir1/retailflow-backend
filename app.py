@@ -131,8 +131,9 @@ class MagazaTransferSistemi:
             
             # Target store validation
             if 'target_store' in request_data and self.magazalar:
-                if request_data['target_store'] not in self.magazalar:
-                    logger.warning(f"Invalid target_store: {request_data['target_store']}")
+                ts = request_data.get('target_store')
+                if ts is not None and ts not in self.magazalar:
+                    logger.warning(f"Invalid target_store: {ts}")
                     request_data['target_store'] = None
             
             return request_data
@@ -1975,3 +1976,9 @@ def api_exec_summary():
         "top_priority_actions": top_actions,
         "system_health": system_health
     })
+
+
+@app.route('/favicon.ico')
+def favicon():
+    # Prevent 404/Warning logs for browsers requesting favicon
+    return ('', 204)
