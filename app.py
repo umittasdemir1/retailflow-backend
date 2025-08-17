@@ -339,6 +339,8 @@ class MagazaTransferSistemi:
             self.data = df
             self.magazalar = df['Depo Adi'].unique().tolist()
             
+            # Create product keys immediately after loading
+            self.data = self.create_product_key_vectorized(self.data)
             end_memory = self.check_memory_usage()
             logger.info(f"File processing completed - Memory usage: {end_memory}%")
             logger.info(f"Veri yuklendi: {len(df)} satir, {len(self.magazalar)} magaza")
@@ -540,6 +542,11 @@ class MagazaTransferSistemi:
             
             try:
                 eksik_urun_anahtari = eksik_row['urun_anahtari']
+                # TARGET STORE aggregated inventory check for this product key
+                _t_env = int(self.data[(self.data['Depo Adi'] == target_store) & (self.data['urun_anahtari'] == eksik_urun_anahtari)]['Envanter'].sum())
+                if _t_env > 0:
+                    # Target store already has stock for this key (other SKU); skip
+                    continue
                 urun_adi = eksik_row['Urun Adi']
                 renk = eksik_row.get('Renk Aciklamasi', '')
                 beden = str(eksik_row.get('Beden', '')).strip()
@@ -1632,4 +1639,5 @@ if __name__ == '__main__':
     logger.info("- Enhanced error handling")
     logger.info("- Performance metrics with Excel export")
     logger.info("- Transfer impact simulation")
+    
     app.run(host='0.0.0.0', port=port, debug=debug_mode)
