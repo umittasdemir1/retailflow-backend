@@ -531,7 +531,7 @@ class MagazaTransferSistemi:
                 'toplam_eksik_beden': 0
             }
             self.mevcut_analiz = result
-        self.save_to_temp()
+            self.save_to_temp()
             return result
         
         for index, eksik_row in sifir_envanter.iterrows():
